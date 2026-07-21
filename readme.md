@@ -105,13 +105,6 @@ cp .env.example .env
 
 ```
 
-1. Run database migrations:
-
-```bash
-npm run migration:run
-
-```
-
 1. Start the development server:
 
 ```bash
