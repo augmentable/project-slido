@@ -19,6 +19,10 @@ import { AppDataSource } from './data-source';
 import { pubSub } from './pubsub';
 import { SessionResolver } from './resolvers/SessionResolver';
 import { QuestionResolver } from './resolvers/QuestionResolver';
+import { PollResolver, PollOptionResolver } from './resolvers/PollResolver';
+import { QuizResolver } from './resolvers/QuizResolver';
+import { SurveyResolver } from './resolvers/SurveyResolver';
+import { AnalyticsResolver } from './resolvers/AnalyticsResolver';
 import { expressMiddleware } from '@as-integrations/express5';
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
@@ -32,7 +36,15 @@ async function main() {
   console.log('⚡ Database connected successfully');
 
   const schema = await buildSchema({
-    resolvers: [SessionResolver, QuestionResolver],
+    resolvers: [
+      SessionResolver,
+      QuestionResolver,
+      PollResolver,
+      PollOptionResolver,
+      QuizResolver,
+      SurveyResolver,
+      AnalyticsResolver,
+    ],
     pubSub,
     validate: true,
   });

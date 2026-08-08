@@ -21,6 +21,22 @@ export class Question {
   @Field(() => String)
   text!: string;
 
+  @Column('varchar', { nullable: true })
+  @Field(() => String, { nullable: true })
+  authorName!: string | null;
+
+  @Column('boolean', { default: true })
+  @Field(() => Boolean)
+  isApproved!: boolean;
+
+  @Column('boolean', { default: false })
+  @Field(() => Boolean)
+  isHighlighted!: boolean;
+
+  @Column('boolean', { default: false })
+  @Field(() => Boolean)
+  isAnswered!: boolean;
+
   @ManyToOne(() => Session, (session) => session.questions, {
     onDelete: 'CASCADE',
   })
@@ -29,7 +45,6 @@ export class Question {
   @OneToMany(() => Upvote, (upvote) => upvote.question)
   upvotes!: Upvote[];
 
-  // Field Resolver computed property (not stored as a static column in DB)
   @Field(() => Int)
   upvoteCount!: number;
 

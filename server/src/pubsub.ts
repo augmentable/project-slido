@@ -1,11 +1,14 @@
 import { createPubSub } from '@graphql-yoga/subscription';
 import { Question } from './entities/Question';
+import { Poll } from './entities/Poll';
+import { Quiz } from './entities/Quiz';
 
-// Define our topics and their payload types:
-// TOPIC_NAME: [topicId (string/number), payload]
 export type PubSubChannels = {
-  QUESTION_UPVOTED: [string, Question]; // [sessionId, updatedQuestion]
-  NEW_QUESTION: [string, Question]; // [sessionId, newQuestion]
+  QUESTION_UPVOTED: [string, Question];
+  NEW_QUESTION: [string, Question];
+  QUESTION_MODERATED: [string, Question];
+  POLL_UPDATED: [string, Poll];
+  QUIZ_STATE_CHANGED: [string, Quiz];
 };
 
 export const pubSub = createPubSub<PubSubChannels>();
