@@ -4,12 +4,14 @@ import {
   Column,
   CreateDateColumn,
   OneToMany,
+  ManyToOne,
 } from 'typeorm';
 import { ObjectType, Field, ID } from 'type-graphql';
 import { Question } from './Question';
 import { Poll } from './Poll';
 import { Quiz } from './Quiz';
 import { Survey } from './Survey';
+import { User } from './User';
 
 @Entity()
 @ObjectType()
@@ -45,6 +47,10 @@ export class Session {
   @Column('varchar', { nullable: true })
   @Field(() => String, { nullable: true })
   logoUrl!: string | null;
+
+  @ManyToOne(() => User, (user) => user.sessions, { nullable: true, onDelete: 'SET NULL' })
+  @Field(() => User, { nullable: true })
+  owner!: User | null;
 
   @OneToMany(() => Question, (question) => question.session)
   @Field(() => [Question])

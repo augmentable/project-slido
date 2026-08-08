@@ -18,6 +18,10 @@ const GET_POLL = gql`
         position
         voteCount
       }
+      responses {
+        id
+        textValue
+      }
     }
   }
 `;
@@ -147,12 +151,26 @@ export function PollCard({ poll: initialPoll, voterToken, isCreator }: { poll: a
           ))}
           <span className="text-xs text-slate-400 font-mono ml-auto">{poll.responseCount || 0} responses</span>
         </div>
-      ) : poll.type === 'WORD_CLOUD' || poll.type === 'OPEN_TEXT' ? (
+      ) : poll.type === 'WORD_CLOUD' ? (
+        <div className="space-y-3">
+          <WordCloud responses={poll.responses || []} />
+          {poll.isActive && !submitted && (
+            <input
+              type="text"
+              placeholder="Enter a word..."
+              value={textValue}
+              onChange={(e) => setTextValue(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          )}
+          <span className="text-xs text-slate-400 font-mono">{poll.responseCount || 0} responses</span>
+        </div>
+      ) : poll.type === 'OPEN_TEXT' ? (
         <div className="space-y-2">
           {poll.isActive && !submitted && (
             <input
               type="text"
-              placeholder={poll.type === 'WORD_CLOUD' ? 'Enter a word...' : 'Type your answer...'}
+              placeholder="Type your answer..."
               value={textValue}
               onChange={(e) => setTextValue(e.target.value)}
               className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -177,6 +195,42 @@ export function PollCard({ poll: initialPoll, voterToken, isCreator }: { poll: a
       {submitted && (
         <p className="text-xs text-green-400 text-center">Response submitted!</p>
       )}
+    </div>
+  );
+}
+
+function WordCloud({ responses }: { responses: { textValue: string | null }[] }) {
+  const wordCounts = new Map<string, number>();
+  for (const r of responses) {
+    if (!r.textValue) continue;
+    const word = r.textValue.toLowerCase().trim();
+    wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
+  }
+
+  if (wordCounts.size === 0) {
+    return <p className="text-xs text-slate-500 text-center py-4">No words yet</p>;
+  }
+
+  const entries = [...wordCounts.entries()].sort((a, b) => b[1] - a[1]);
+  const maxCount = entries[0][1];
+  const colors = ['text-indigo-400', 'text-blue-400', 'text-purple-400', 'text-pink-400', 'text-cyan-400', 'text-emerald-400', 'text-amber-400', 'text-rose-400'];
+
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-2 py-4 bg-slate-900/50 rounded-lg px-4 min-h-20">
+      {entries.map(([word, count], i) => {
+        const scale = 0.75 + (count / maxCount) * 1.25;
+        const colorClass = colors[i % colors.length];
+        return (
+          <span
+            key={word}
+            className={`font-bold transition-all ${colorClass}`}
+            style={{ fontSize: `${scale}rem`, opacity: 0.6 + (count / maxCount) * 0.4 }}
+            title={`${word}: ${count}`}
+          >
+            {word}
+          </span>
+        );
+      })}
     </div>
   );
 }

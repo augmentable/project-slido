@@ -9,6 +9,7 @@ import {
 import { Question } from '../entities/Question';
 import { Session } from '../entities/Session';
 import { Upvote } from '../entities/Upvote';
+import { Reply } from '../entities/Reply';
 import { AppDataSource } from '../data-source';
 import { pubSub } from '../pubsub';
 
@@ -21,6 +22,7 @@ export class QuestionResolver {
   private questionRepo = AppDataSource.getRepository(Question);
   private sessionRepo = AppDataSource.getRepository(Session);
   private upvoteRepo = AppDataSource.getRepository(Upvote);
+  private replyRepo = AppDataSource.getRepository(Reply);
 
   @FieldResolver(() => Number)
   async upvoteCount(@Root() question: Question): Promise<number> {
@@ -139,6 +141,31 @@ export class QuestionResolver {
     @Arg('sessionId', () => String) sessionId: string,
   ): Question {
     return questionPayload;
+  }
+
+  @Mutation(() => Reply)
+  async replyToQuestion(
+    @Arg('questionId', () => String) questionId: string,
+    @Arg('text', () => String) text: string,
+    @Arg('authorName', () => String) authorName: string,
+  ): Promise<Reply> {
+    const trimmedText = text.trim().slice(0, 2000);
+    if (!trimmedText) throw new Error('Reply text is required');
+
+    const question = await this.questionRepo.findOne({
+      where: { id: questionId },
+      relations: { session: true },
+    });
+    if (!question) throw new Error('Question not found');
+
+    const reply = this.replyRepo.create({
+      text: trimmedText,
+      authorName: authorName.trim().slice(0, MAX_NAME_LENGTH) || 'Host',
+      question,
+    });
+    const saved = await this.replyRepo.save(reply);
+    pubSub.publish('QUESTION_MODERATED', question.session.id, question);
+    return saved;
   }
 
   @Mutation(() => Question)

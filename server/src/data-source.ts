@@ -14,6 +14,8 @@ import { SurveyQuestion } from './entities/SurveyQuestion';
 import { SurveyOption } from './entities/SurveyOption';
 import { SurveyResponse } from './entities/SurveyResponse';
 import { SurveyAnswer } from './entities/SurveyAnswer';
+import { User } from './entities/User';
+import { Reply } from './entities/Reply';
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
@@ -38,6 +40,8 @@ export const AppDataSource = new DataSource({
     SurveyOption,
     SurveyResponse,
     SurveyAnswer,
+    User,
+    Reply,
   ],
   migrations: [__dirname + '/migrations/*.ts'],
   subscribers: [],

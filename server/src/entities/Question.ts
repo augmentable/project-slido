@@ -9,6 +9,7 @@ import {
 import { ObjectType, Field, ID, Int } from 'type-graphql';
 import { Session } from './Session';
 import { Upvote } from './Upvote';
+import { Reply } from './Reply';
 
 @Entity()
 @ObjectType()
@@ -44,6 +45,10 @@ export class Question {
 
   @OneToMany(() => Upvote, (upvote) => upvote.question)
   upvotes!: Upvote[];
+
+  @OneToMany(() => Reply, (reply) => reply.question, { cascade: true })
+  @Field(() => [Reply])
+  replies!: Reply[];
 
   @Field(() => Int)
   upvoteCount!: number;

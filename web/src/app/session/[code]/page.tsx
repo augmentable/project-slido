@@ -20,6 +20,7 @@ const GET_SESSION_DETAILS = gql`
       isModerated
       primaryColor
       logoUrl
+      owner { id displayName }
       questions {
         id
         text
@@ -29,6 +30,7 @@ const GET_SESSION_DETAILS = gql`
         isAnswered
         upvoteCount
         createdAt
+        replies { id text authorName createdAt }
       }
       polls {
         id
@@ -102,6 +104,14 @@ const MARK_ANSWERED = gql`
   }
 `;
 
+const REPLY_TO_QUESTION = gql`
+  mutation ReplyToQuestion($questionId: String!, $text: String!, $authorName: String!) {
+    replyToQuestion(questionId: $questionId, text: $text, authorName: $authorName) {
+      id text authorName createdAt
+    }
+  }
+`;
+
 const QUESTION_UPVOTED_SUB = gql`
   subscription OnQuestionUpvoted($sessionId: String!) {
     questionUpvoted(sessionId: $sessionId) { id text upvoteCount }
@@ -127,6 +137,7 @@ const POLL_UPDATED_SUB = gql`
 `;
 
 type Tab = 'qa' | 'polls' | 'quiz' | 'surveys';
+type SortMode = 'popular' | 'recent' | 'unanswered';
 
 export default function SessionPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
@@ -142,6 +153,7 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
   });
 
   const [activeTab, setActiveTab] = useState<Tab>('qa');
+  const [sortMode, setSortMode] = useState<SortMode>('popular');
   const [questionText, setQuestionText] = useState('');
   const [authorName, setAuthorName] = useState('');
   const [showModeration, setShowModeration] = useState(false);
@@ -191,6 +203,7 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
   const [rejectQuestion] = useMutation(REJECT_QUESTION, { onCompleted: () => { refetch(); refetchPending(); } });
   const [highlightQuestion] = useMutation(HIGHLIGHT_QUESTION, { onCompleted: () => refetch() });
   const [markAnswered] = useMutation(MARK_ANSWERED, { onCompleted: () => refetch() });
+  const [replyToQuestion] = useMutation(REPLY_TO_QUESTION, { onCompleted: () => refetch() });
 
   if (loading) {
     return (
@@ -214,9 +227,20 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
     : {};
 
   const highlighted = [...(session.questions || [])].filter((q: { isHighlighted: boolean }) => q.isHighlighted);
+
+  type QType = { id: string; text: string; authorName: string | null; isAnswered: boolean; upvoteCount: number; isHighlighted: boolean; createdAt: string; replies: { id: string; text: string; authorName: string; createdAt: string }[] };
+
   const sortedQuestions = [...(session.questions || [])]
-    .filter((q: { isHighlighted: boolean }) => !q.isHighlighted)
-    .sort((a: { upvoteCount: number }, b: { upvoteCount: number }) => b.upvoteCount - a.upvoteCount);
+    .filter((q: QType) => !q.isHighlighted)
+    .sort((a: QType, b: QType) => {
+      if (sortMode === 'popular') return b.upvoteCount - a.upvoteCount;
+      if (sortMode === 'recent') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      if (sortMode === 'unanswered') {
+        if (a.isAnswered !== b.isAnswered) return a.isAnswered ? 1 : -1;
+        return b.upvoteCount - a.upvoteCount;
+      }
+      return 0;
+    });
 
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: 'qa', label: 'Q&A', count: session.questions?.length || 0 },
@@ -234,13 +258,19 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
             <div className="flex items-center gap-3">
               <Link href="/" className="text-xs text-indigo-400 hover:underline font-mono uppercase tracking-wider">&larr; Leave</Link>
               <Link href={`/session/${code}/analytics`} className="text-xs text-slate-400 hover:text-slate-300 font-mono uppercase tracking-wider">Analytics</Link>
+              <Link href={`/session/${code}/present`} className="text-xs text-emerald-400 hover:text-emerald-300 font-mono uppercase tracking-wider">Present</Link>
             </div>
             <div className="flex items-center gap-3 mt-1">
               {session.logoUrl && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={session.logoUrl} alt="" className="h-8 w-8 rounded object-cover" />
               )}
-              <h1 className="text-2xl font-bold text-slate-100">{session.title}</h1>
+              <div>
+                <h1 className="text-2xl font-bold text-slate-100">{session.title}</h1>
+                {session.owner && (
+                  <p className="text-xs text-slate-500">Hosted by {session.owner.displayName}</p>
+                )}
+              </div>
             </div>
           </div>
           <div className="bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-lg text-right">
@@ -341,19 +371,38 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
               </div>
             </form>
 
+            {/* Sorting Controls */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500 font-mono">Sort:</span>
+              {(['popular', 'recent', 'unanswered'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setSortMode(mode)}
+                  className={`text-xs px-3 py-1 rounded-full font-medium transition-colors ${
+                    sortMode === mode
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {mode === 'popular' ? '🔥 Popular' : mode === 'recent' ? '🕐 Recent' : '❓ Unanswered'}
+                </button>
+              ))}
+            </div>
+
             {/* Highlighted Questions */}
             {highlighted.length > 0 && (
               <div className="space-y-2">
                 <h3 className="text-xs font-semibold text-yellow-400 uppercase tracking-wider flex items-center gap-1">
                   <span>&#9733;</span> Highlighted
                 </h3>
-                {highlighted.map((q: { id: string; text: string; authorName: string | null; isAnswered: boolean; upvoteCount: number; isHighlighted: boolean }) => (
+                {highlighted.map((q: QType) => (
                   <QuestionItem
                     key={q.id}
                     q={q}
                     onUpvote={() => upvoteQuestion({ variables: { questionId: q.id, voterToken } })}
                     onHighlight={() => highlightQuestion({ variables: { questionId: q.id, highlighted: !q.isHighlighted } })}
                     onMarkAnswered={() => markAnswered({ variables: { questionId: q.id, answered: !q.isAnswered } })}
+                    onReply={(text: string, name: string) => replyToQuestion({ variables: { questionId: q.id, text, authorName: name } })}
                     isHighlighted
                   />
                 ))}
@@ -371,13 +420,14 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
                   No questions yet. Be the first to ask!
                 </div>
               ) : (
-                sortedQuestions.map((q: { id: string; text: string; authorName: string | null; isAnswered: boolean; upvoteCount: number; isHighlighted: boolean }) => (
+                sortedQuestions.map((q: QType) => (
                   <QuestionItem
                     key={q.id}
                     q={q}
                     onUpvote={() => upvoteQuestion({ variables: { questionId: q.id, voterToken } })}
                     onHighlight={() => highlightQuestion({ variables: { questionId: q.id, highlighted: !q.isHighlighted } })}
                     onMarkAnswered={() => markAnswered({ variables: { questionId: q.id, answered: !q.isAnswered } })}
+                    onReply={(text: string, name: string) => replyToQuestion({ variables: { questionId: q.id, text, authorName: name } })}
                   />
                 ))
               )}
@@ -466,47 +516,101 @@ function QuestionItem({
   onUpvote,
   onHighlight,
   onMarkAnswered,
+  onReply,
   isHighlighted,
 }: {
-  q: { id: string; text: string; authorName: string | null; isAnswered: boolean; upvoteCount: number; isHighlighted: boolean };
+  q: { id: string; text: string; authorName: string | null; isAnswered: boolean; upvoteCount: number; isHighlighted: boolean; replies?: { id: string; text: string; authorName: string; createdAt: string }[] };
   onUpvote: () => void;
   onHighlight: () => void;
   onMarkAnswered: () => void;
+  onReply: (text: string, name: string) => void;
   isHighlighted?: boolean;
 }) {
+  const [showReplyForm, setShowReplyForm] = useState(false);
+  const [replyText, setReplyText] = useState('');
+  const [replyName, setReplyName] = useState('');
+
   return (
-    <div className={`border p-4 rounded-xl flex items-start justify-between gap-4 transition-all hover:border-slate-600 ${
+    <div className={`border p-4 rounded-xl transition-all hover:border-slate-600 ${
       isHighlighted
         ? 'bg-yellow-950/20 border-yellow-700/40'
         : q.isAnswered
         ? 'bg-green-950/10 border-green-800/30'
         : 'bg-slate-800/90 border-slate-700/60'
     }`}>
-      <div className="flex-1 space-y-1">
-        <p className="text-slate-200 text-sm leading-relaxed">{q.text}</p>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 space-y-1">
+          <p className="text-slate-200 text-sm leading-relaxed">{q.text}</p>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-slate-500">{q.authorName || 'Anonymous'}</span>
+            {q.isAnswered && <span className="text-[10px] text-green-400 bg-green-950/40 px-1.5 py-0.5 rounded">Answered</span>}
+          </div>
+        </div>
+
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-slate-500">{q.authorName || 'Anonymous'}</span>
-          {q.isAnswered && <span className="text-[10px] text-green-400 bg-green-950/40 px-1.5 py-0.5 rounded">Answered</span>}
+          <div className="flex flex-col gap-0.5">
+            <button onClick={onHighlight} className="text-[10px] text-yellow-500 hover:text-yellow-400" title="Highlight">
+              {q.isHighlighted ? '★' : '☆'}
+            </button>
+            <button onClick={onMarkAnswered} className="text-[10px] text-green-500 hover:text-green-400" title="Mark answered">
+              ✓
+            </button>
+            <button onClick={() => setShowReplyForm(!showReplyForm)} className="text-[10px] text-blue-400 hover:text-blue-300" title="Reply">
+              💬
+            </button>
+          </div>
+          <button
+            onClick={onUpvote}
+            className="flex flex-col items-center justify-center bg-slate-900 hover:bg-indigo-950/60 border border-slate-700 hover:border-indigo-500/50 text-indigo-400 px-3 py-2 rounded-lg transition-all min-w-13"
+          >
+            <span className="text-xs">▲</span>
+            <span className="text-xs font-bold font-mono">{q.upvoteCount}</span>
+          </button>
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="flex flex-col gap-0.5">
-          <button onClick={onHighlight} className="text-[10px] text-yellow-500 hover:text-yellow-400" title="Highlight">
-            {q.isHighlighted ? '★' : '☆'}
-          </button>
-          <button onClick={onMarkAnswered} className="text-[10px] text-green-500 hover:text-green-400" title="Mark answered">
-            ✓
-          </button>
+      {/* Replies */}
+      {q.replies && q.replies.length > 0 && (
+        <div className="mt-3 ml-4 space-y-2 border-l-2 border-slate-700 pl-3">
+          {q.replies.map((reply) => (
+            <div key={reply.id} className="text-sm">
+              <span className="text-indigo-400 font-medium text-xs">{reply.authorName}</span>
+              <p className="text-slate-300 text-xs leading-relaxed mt-0.5">{reply.text}</p>
+            </div>
+          ))}
         </div>
-        <button
-          onClick={onUpvote}
-          className="flex flex-col items-center justify-center bg-slate-900 hover:bg-indigo-950/60 border border-slate-700 hover:border-indigo-500/50 text-indigo-400 px-3 py-2 rounded-lg transition-all min-w-13"
+      )}
+
+      {/* Reply Form */}
+      {showReplyForm && (
+        <form
+          className="mt-3 ml-4 flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!replyText.trim()) return;
+            onReply(replyText.trim(), replyName.trim() || 'Host');
+            setReplyText('');
+            setShowReplyForm(false);
+          }}
         >
-          <span className="text-xs">▲</span>
-          <span className="text-xs font-bold font-mono">{q.upvoteCount}</span>
-        </button>
-      </div>
+          <input
+            type="text"
+            placeholder="Your name"
+            value={replyName}
+            onChange={(e) => setReplyName(e.target.value)}
+            className="w-24 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          />
+          <input
+            type="text"
+            placeholder="Write a reply..."
+            value={replyText}
+            onChange={(e) => setReplyText(e.target.value)}
+            className="flex-1 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            autoFocus
+          />
+          <button type="submit" className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1 rounded transition-colors">Reply</button>
+        </form>
+      )}
     </div>
   );
 }

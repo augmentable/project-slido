@@ -23,6 +23,7 @@ import { PollResolver, PollOptionResolver } from './resolvers/PollResolver';
 import { QuizResolver } from './resolvers/QuizResolver';
 import { SurveyResolver } from './resolvers/SurveyResolver';
 import { AnalyticsResolver } from './resolvers/AnalyticsResolver';
+import { AuthResolver } from './resolvers/AuthResolver';
 import { expressMiddleware } from '@as-integrations/express5';
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
@@ -44,6 +45,7 @@ async function main() {
       QuizResolver,
       SurveyResolver,
       AnalyticsResolver,
+      AuthResolver,
     ],
     pubSub,
     validate: true,
