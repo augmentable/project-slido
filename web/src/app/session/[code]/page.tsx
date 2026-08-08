@@ -75,7 +75,7 @@ export default function SessionPage({
   const [voterToken] = useState(() => {
     let token = localStorage.getItem('slido_voter_token');
     if (!token) {
-      token = 'voter_' + Math.random().toString(36).substring(2, 9);
+      token = crypto.randomUUID();
       localStorage.setItem('slido_voter_token', token);
     }
     return token;

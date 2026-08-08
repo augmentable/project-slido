@@ -12,13 +12,15 @@ import { Upvote } from '../entities/Upvote';
 import { AppDataSource } from '../data-source';
 import { pubSub } from '../pubsub';
 
+const MAX_QUESTION_LENGTH = 2000;
+const MAX_TOKEN_LENGTH = 64;
+
 @Resolver(() => Question)
 export class QuestionResolver {
   private questionRepo = AppDataSource.getRepository(Question);
   private sessionRepo = AppDataSource.getRepository(Session);
   private upvoteRepo = AppDataSource.getRepository(Upvote);
 
-  // FIELD RESOLVER: Resolves `upvoteCount` whenever a client requests it
   @FieldResolver(() => Number)
   async upvoteCount(@Root() question: Question): Promise<number> {
     return this.upvoteRepo.count({
@@ -26,27 +28,25 @@ export class QuestionResolver {
     });
   }
 
-  // MUTATION: Add a question to a session
   @Mutation(() => Question)
   async createQuestion(
     @Arg('sessionId', () => String) sessionId: string,
     @Arg('text', () => String) text: string,
   ): Promise<Question> {
-    const session = await this.sessionRepo.findOneBy({ id: sessionId });
-    if (!session) {
-      throw new Error('Session not found');
-    }
+    const trimmedText = text.trim().slice(0, MAX_QUESTION_LENGTH);
+    if (!trimmedText) throw new Error('Question text is required');
 
-    const question = this.questionRepo.create({ text, session });
+    const session = await this.sessionRepo.findOneBy({ id: sessionId });
+    if (!session) throw new Error('Session not found');
+
+    const question = this.questionRepo.create({ text: trimmedText, session });
     const savedQuestion = await this.questionRepo.save(question);
 
-    // Publish event so all connected clients get the new question live!
     pubSub.publish('NEW_QUESTION', session.id, savedQuestion);
 
     return savedQuestion;
   }
 
-  // SUBSCRIPTION: Listen for new questions created in a specific session
   @Subscription(() => Question, {
     topics: 'NEW_QUESTION',
     topicId: ({ args }) => args.sessionId,
@@ -57,69 +57,39 @@ export class QuestionResolver {
   ): Question {
     return questionPayload;
   }
-  // MUTATION: Upvote a question (Deduplicated by voterToken)
-  // @Mutation(() => Boolean)
-  // async upvoteQuestion(
-  //   @Arg('questionId', () => String) questionId: string,
-  //   @Arg('voterToken', () => String) voterToken: string,
-  // ): Promise<boolean> {
-  //   const question = await this.questionRepo.findOneBy({ id: questionId });
-  //   if (!question) {
-  //     throw new Error('Question not found');
-  //   }
 
-  //   // Check if user already upvoted
-  //   const existing = await this.upvoteRepo.findOne({
-  //     where: { voterToken, question: { id: questionId } },
-  //   });
-
-  //   if (existing) {
-  //     // Remove upvote if toggled off
-  //     await this.upvoteRepo.remove(existing);
-  //     return false;
-  //   }
-
-  //   // Add upvote
-  //   const upvote = this.upvoteRepo.create({ voterToken, question });
-  //   await this.upvoteRepo.save(upvote);
-  //   return true;
-  // }
-
-  // MUTATION: Upvote a Question
   @Mutation(() => Question)
   async upvoteQuestion(
     @Arg('questionId', () => String) questionId: string,
     @Arg('voterToken', () => String) voterToken: string,
   ): Promise<Question> {
+    const sanitizedToken = voterToken.trim().slice(0, MAX_TOKEN_LENGTH);
+    if (!sanitizedToken) throw new Error('Voter token is required');
+
     const question = await this.questionRepo.findOne({
       where: { id: questionId },
       relations: { session: true },
     });
 
-    if (!question) {
-      throw new Error('Question not found');
-    }
+    if (!question) throw new Error('Question not found');
 
-    // Check if user already upvoted
     const existingUpvote = await this.upvoteRepo.findOne({
-      where: { question: { id: questionId }, voterToken },
+      where: { question: { id: questionId }, voterToken: sanitizedToken },
     });
 
     if (!existingUpvote) {
-      const upvote = this.upvoteRepo.create({ question, voterToken });
+      const upvote = this.upvoteRepo.create({ question, voterToken: sanitizedToken });
       await this.upvoteRepo.save(upvote);
     }
 
-    // Publish event scoped to this session's ID using dynamic topicId
     pubSub.publish('QUESTION_UPVOTED', question.session.id, question);
 
     return question;
   }
 
-  // SUBSCRIPTION: Listen for live upvotes in a specific session
   @Subscription(() => Question, {
     topics: 'QUESTION_UPVOTED',
-    topicId: ({ args }) => args.sessionId, // Scopes subscription to specific session ID
+    topicId: ({ args }) => args.sessionId,
   })
   questionUpvoted(
     @Root() questionPayload: Question,
