@@ -68,3 +68,7 @@ ehthumbs.db
 # Build output directories
 dist/
 build/
+
+# Cloudflare
+.wrangler/
+.open-next/

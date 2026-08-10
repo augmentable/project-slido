@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { gql } from '@apollo/client';
 import { useLazyQuery, useMutation } from '@apollo/client/react';
+import { ThemePicker } from '@/components/ThemePicker';
+import { useTheme } from '@/components/ThemeProvider';
 
 const CREATE_SESSION = gql`
   mutation CreateSession($title: String!, $code: String!, $isModerated: Boolean, $passcode: String, $authToken: String) {
@@ -41,6 +43,7 @@ const ME = gql`
 
 export default function HomePage() {
   const router = useRouter();
+  const { theme, setTheme } = useTheme();
 
   const [joinCode, setJoinCode] = useState('');
   const [joinPasscode, setJoinPasscode] = useState('');
@@ -51,7 +54,6 @@ export default function HomePage() {
   const [errorMsg, setErrorMsg] = useState('');
   const [needsPasscode, setNeedsPasscode] = useState(false);
 
-  // Auth state
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [authEmail, setAuthEmail] = useState('');
@@ -106,42 +108,27 @@ export default function HomePage() {
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!joinCode.trim()) return;
-
     setErrorMsg('');
     const codeFormatted = joinCode.trim().toUpperCase();
-
-    const { data } = await getSession({
-      variables: { code: codeFormatted, passcode: joinPasscode || null },
-    });
-
+    const { data } = await getSession({ variables: { code: codeFormatted, passcode: joinPasscode || null } });
     if (data?.session) {
       router.push(`/session/${codeFormatted}`);
     } else if (!needsPasscode) {
       setNeedsPasscode(true);
       setErrorMsg('This session may require a passcode.');
     } else {
-      setErrorMsg(`Session with code "${codeFormatted}" not found or incorrect passcode.`);
+      setErrorMsg(`Session "${codeFormatted}" not found or incorrect passcode.`);
     }
   };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim() || !newCode.trim()) return;
-
     setErrorMsg('');
     const codeFormatted = newCode.trim().toUpperCase();
     const authToken = localStorage.getItem('slido_auth_token') || null;
-
     try {
-      await createSession({
-        variables: {
-          title: newTitle.trim(),
-          code: codeFormatted,
-          isModerated,
-          passcode: newPasscode || null,
-          authToken,
-        },
-      });
+      await createSession({ variables: { title: newTitle.trim(), code: codeFormatted, isModerated, passcode: newPasscode || null, authToken } });
       router.push(`/session/${codeFormatted}`);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
@@ -150,167 +137,110 @@ export default function HomePage() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-900 text-slate-100 flex flex-col items-center justify-center p-6">
-      <div className="max-w-md w-full space-y-8">
-        {/* User bar */}
-        <div className="flex justify-end">
+    <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-dots-pattern relative">
+      <div className="absolute inset-0" style={{ background: 'var(--gradient-hero)' }} />
+      <div className="relative z-10 max-w-md w-full space-y-8">
+
+        {/* Top bar */}
+        <div className="flex items-center justify-between animate-fade-in">
+          <ThemePicker current={theme} onChange={setTheme} />
           {currentUser ? (
             <div className="flex items-center gap-3">
-              <span className="text-sm text-slate-300">
-                <span className="text-indigo-400 font-medium">{currentUser.displayName}</span>
-              </span>
-              <button onClick={handleLogout} className="text-xs text-slate-500 hover:text-slate-300 font-mono">Logout</button>
+              <span className="text-sm" style={{ color: 'var(--accent)' }}>{currentUser.displayName}</span>
+              <button onClick={handleLogout} className="text-xs hover:underline" style={{ color: 'var(--text-muted)' }}>Logout</button>
             </div>
           ) : (
-            <button
-              onClick={() => setShowAuth(!showAuth)}
-              className="text-xs text-indigo-400 hover:text-indigo-300 font-mono"
-            >
-              Sign in / Register
+            <button onClick={() => setShowAuth(!showAuth)} className="text-xs font-medium hover:underline" style={{ color: 'var(--accent)' }}>
+              Sign in
             </button>
           )}
         </div>
 
-        <div className="text-center space-y-2">
-          <h1 className="text-4xl font-extrabold tracking-tight text-indigo-400">
-            Live Q&A
+        {/* Hero */}
+        <div className="text-center space-y-3 animate-slide-up">
+          <h1 className="text-5xl font-black tracking-tight" style={{ fontFamily: "'Cabinet Grotesk', sans-serif", color: 'var(--text-strong)' }}>
+            Live<span style={{ color: 'var(--accent)' }}>Q&A</span>
           </h1>
-          <p className="text-slate-400 text-sm">
-            Real-time audience interaction &mdash; Q&A, Polls, Quizzes &amp; Surveys
+          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+            Real-time audience interaction &mdash; polls, quizzes &amp; surveys
           </p>
         </div>
 
         {errorMsg && (
-          <div className="p-3 bg-red-950/60 border border-red-800 text-red-200 text-sm rounded-lg text-center">
+          <div className="animate-fade-in px-4 py-3 rounded-xl text-sm text-center" style={{ background: 'var(--danger-subtle)', color: 'var(--danger)', border: '1px solid var(--danger)' }}>
             {errorMsg}
           </div>
         )}
 
-        {/* Auth Modal */}
+        {/* Auth panel */}
         {showAuth && !currentUser && (
-          <div className="bg-slate-800/90 p-6 rounded-2xl border border-indigo-500/30 shadow-xl space-y-4">
+          <div className="themed-card p-6 space-y-4 animate-slide-up" style={{ borderColor: 'var(--accent)', boxShadow: 'var(--glow)' }}>
             <div className="flex gap-2">
-              <button
-                onClick={() => setAuthMode('login')}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium ${authMode === 'login' ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-400'}`}
-              >
-                Login
-              </button>
-              <button
-                onClick={() => setAuthMode('register')}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium ${authMode === 'register' ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-400'}`}
-              >
-                Register
-              </button>
+              {(['login', 'register'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setAuthMode(mode)}
+                  className="flex-1 py-2 rounded-lg text-sm font-medium transition-all"
+                  style={{
+                    background: authMode === mode ? 'var(--accent)' : 'var(--bg-input)',
+                    color: authMode === mode ? 'var(--bg)' : 'var(--text-muted)',
+                  }}
+                >
+                  {mode === 'login' ? 'Sign In' : 'Register'}
+                </button>
+              ))}
             </div>
             <form onSubmit={handleAuth} className="space-y-3">
               {authMode === 'register' && (
-                <input
-                  type="text"
-                  placeholder="Display Name"
-                  value={authName}
-                  onChange={(e) => setAuthName(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-                  required
-                />
+                <input type="text" placeholder="Display Name" value={authName} onChange={(e) => setAuthName(e.target.value)} className="themed-input w-full" required />
               )}
-              <input
-                type="email"
-                placeholder="Email"
-                value={authEmail}
-                onChange={(e) => setAuthEmail(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-                required
-              />
-              <input
-                type="password"
-                placeholder="Password"
-                value={authPassword}
-                onChange={(e) => setAuthPassword(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-                required
-              />
-              <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2.5 rounded-lg transition-colors text-sm">
+              <input type="email" placeholder="Email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} className="themed-input w-full" required />
+              <input type="password" placeholder="Password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} className="themed-input w-full" required />
+              <button type="submit" className="themed-btn w-full">
                 {authMode === 'login' ? 'Sign In' : 'Create Account'}
               </button>
             </form>
           </div>
         )}
 
-        <div className="bg-slate-800/80 p-6 rounded-2xl border border-slate-700/50 shadow-xl space-y-6">
-          {/* Join Session */}
+        {/* Main card */}
+        <div className="themed-card p-6 space-y-6 animate-slide-up stagger-2">
+          {/* Join */}
           <form onSubmit={handleJoin} className="space-y-3">
-            <h2 className="text-lg font-semibold text-slate-200">Join a Session</h2>
+            <h2 className="text-lg font-bold" style={{ color: 'var(--text-strong)' }}>Join a Session</h2>
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="Enter Code (e.g. SLIDODEV)"
+                placeholder="Enter code e.g. SLIDODEV"
                 value={joinCode}
                 onChange={(e) => setJoinCode(e.target.value)}
-                className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 uppercase tracking-wider font-mono text-sm"
+                className="themed-input flex-1 uppercase tracking-widest font-mono text-sm"
               />
-              <button
-                type="submit"
-                disabled={checking}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-5 py-2.5 rounded-lg transition-colors text-sm disabled:opacity-50"
-              >
-                {checking ? 'Checking...' : 'Join'}
+              <button type="submit" disabled={checking} className="themed-btn">
+                {checking ? '...' : 'Join'}
               </button>
             </div>
             {needsPasscode && (
-              <input
-                type="password"
-                placeholder="Session passcode"
-                value={joinPasscode}
-                onChange={(e) => setJoinPasscode(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-              />
+              <input type="password" placeholder="Session passcode" value={joinPasscode} onChange={(e) => setJoinPasscode(e.target.value)} className="themed-input w-full" />
             )}
           </form>
 
           <div className="relative flex items-center justify-center">
-            <div className="border-t border-slate-700 w-full" />
-            <span className="bg-slate-800 px-3 text-xs text-slate-500 uppercase font-mono">Or</span>
+            <div className="w-full" style={{ borderTop: '1px solid var(--border)' }} />
+            <span className="px-3 text-xs uppercase tracking-wider font-medium" style={{ background: 'var(--bg-card)', color: 'var(--text-faint)', position: 'absolute' }}>or</span>
           </div>
 
-          {/* Create Session */}
+          {/* Create */}
           <form onSubmit={handleCreate} className="space-y-3">
-            <h2 className="text-lg font-semibold text-slate-200">Create New Session</h2>
-            <input
-              type="text"
-              placeholder="Session Title (e.g. Tech Talk)"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-            />
-            <input
-              type="text"
-              placeholder="Custom Room Code (e.g. SLIDODEV)"
-              value={newCode}
-              onChange={(e) => setNewCode(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 uppercase tracking-wider font-mono text-sm"
-            />
-            <input
-              type="password"
-              placeholder="Session passcode (optional)"
-              value={newPasscode}
-              onChange={(e) => setNewPasscode(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-            />
-            <label className="flex items-center gap-2 text-sm text-slate-400">
-              <input
-                type="checkbox"
-                checked={isModerated}
-                onChange={(e) => setIsModerated(e.target.checked)}
-                className="rounded border-slate-600 accent-indigo-500"
-              />
+            <h2 className="text-lg font-bold" style={{ color: 'var(--text-strong)' }}>Create New Session</h2>
+            <input type="text" placeholder="Session Title" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} className="themed-input w-full" />
+            <input type="text" placeholder="Room Code" value={newCode} onChange={(e) => setNewCode(e.target.value)} className="themed-input w-full uppercase tracking-widest font-mono text-sm" />
+            <input type="password" placeholder="Passcode (optional)" value={newPasscode} onChange={(e) => setNewPasscode(e.target.value)} className="themed-input w-full" />
+            <label className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: 'var(--text-muted)' }}>
+              <input type="checkbox" checked={isModerated} onChange={(e) => setIsModerated(e.target.checked)} className="rounded" style={{ accentColor: 'var(--accent)' }} />
               Enable Q&A moderation
             </label>
-            <button
-              type="submit"
-              disabled={creating}
-              className="w-full bg-slate-700 hover:bg-slate-600 text-slate-100 font-medium py-2.5 rounded-lg transition-colors text-sm disabled:opacity-50"
-            >
+            <button type="submit" disabled={creating} className="themed-btn-ghost w-full">
               {creating ? 'Creating...' : 'Create Session'}
             </button>
           </form>

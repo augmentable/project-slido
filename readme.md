@@ -1,169 +1,141 @@
 # Real-Time Slido Clone
 
-A full-stack, real-time Q&A and interactive polling application built with **TypeGraphQL**, **TypeORM**, **PostgreSQL**, and **Next.js**.
+A full-stack, real-time Q&A and interactive polling application built with **Next.js**, **GraphQL Yoga**, **Drizzle ORM**, and **Cloudflare D1**. Deployable to **Cloudflare Pages** with zero Docker or Postgres dependencies.
 
-Audience members can join room sessions via custom codes, post questions, and upvote existing questions. All updates are broadcast instantly to all connected users in real time using **GraphQL WebSockets**.
-
----
-
-## 🛠️ Tech Stack
-
-### Backend (`/server`)
-
-* **Framework / Server:** Express.js + Apollo Server (v4)
-* **API Paradigm:** GraphQL (Queries, Mutations, and WebSockets Subscriptions)
-* **GraphQL Framework:** TypeGraphQL (v2)
-* **ORM:** TypeORM
-* **Database:** PostgreSQL (running in Docker)
-* **Real-time Subscriptions:** GraphQL Yoga PubSub (`@graphql-yoga/subscription`) + `graphql-ws`
-
-### Frontend (`/web`)
-
-* **Framework:** Next.js (App Router, React 19)
-* **Language:** TypeScript
-* **Styling:** Tailwind CSS
-* **GraphQL Client:** Apollo Client (with Split Link for HTTP & WebSockets)
+Audience members join sessions via room codes, post questions, vote in polls, take quizzes, and complete surveys. Updates sync across all clients via polling.
 
 ---
 
-## 📁 Project Structure
+## Tech Stack
+
+- **Framework:** Next.js (App Router, React 19)
+- **API:** GraphQL Yoga (served from Next.js Route Handler at `/api/graphql`)
+- **ORM:** Drizzle ORM
+- **Database:** Cloudflare D1 (SQLite) / better-sqlite3 for local dev
+- **Styling:** Tailwind CSS 4
+- **GraphQL Client:** Apollo Client
+- **Charts:** Recharts
+- **Auth:** JWT (jsonwebtoken)
+- **Deploy:** Cloudflare Pages via @opennextjs/cloudflare
+
+---
+
+## Project Structure
 
 ```text
-.
-├── server/                   # GraphQL Backend API
-│   ├── src/
-│   │   ├── entities/         # TypeORM Entities & TypeGraphQL Object Types
-│   │   │   ├── Question.ts
-│   │   │   ├── Session.ts
-│   │   │   └── Upvote.ts
-│   │   ├── resolvers/        # TypeGraphQL Resolvers
-│   │   │   ├── QuestionResolver.ts
-│   │   │   └── SessionResolver.ts
-│   │   ├── data-source.ts    # TypeORM Data Source Config
-│   │   ├── pubsub.ts         # PubSub Config for Subscriptions
-│   │   └── server.ts         # Server Entrypoint
-│   ├── tsconfig.json
-│   └── package.json
-│
-└── web/                      # Next.js Frontend
-    ├── src/
-    │   ├── app/
-    │   │   ├── page.tsx      # Landing Page (Join / Create Session)
-    │   │   └── session/
-    │   │       └── [code]/
-    │   │           └── page.tsx # Real-Time Session Room
-    │   ├── components/       # Apollo Client Wrapper & UI Components
-    │   └── lib/
-    │       └── apollo-client.ts # Apollo Client setup with Split Link
-    └── package.json
-
+web/
+├── src/
+│   ├── app/
+│   │   ├── page.tsx                     # Home (Join / Create / Login)
+│   │   ├── api/
+│   │   │   ├── graphql/route.ts         # GraphQL API endpoint
+│   │   │   └── export/[sessionId]/route.ts  # CSV export
+│   │   └── session/[code]/
+│   │       ├── page.tsx                 # Live session (Q&A, Polls, Quiz, Survey)
+│   │       ├── analytics/page.tsx       # Analytics dashboard
+│   │       └── present/page.tsx         # Presenter / display mode
+│   ├── components/                      # React components
+│   ├── db/
+│   │   ├── schema.ts                    # Drizzle schema (17 tables)
+│   │   ├── index.ts                     # DB client factory
+│   │   └── seed.ts                      # Demo data seed script
+│   └── lib/
+│       └── apollo-client.ts             # Apollo Client setup
+├── drizzle/                             # Generated SQL migrations
+├── wrangler.toml                        # Cloudflare config
+├── drizzle.config.ts                    # Drizzle Kit config
+└── package.json
 ```
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
-* Node.js (v20+)
-* Docker & Docker Compose (for PostgreSQL)
-* npm
+- Node.js (v20+)
+- npm
 
----
+No Docker or PostgreSQL required.
 
-### 1. Database Setup
-
-Run PostgreSQL using Docker Compose:
-
-```bash
-docker compose up -d
-
-```
-
----
-
-### 2. Backend Setup (`/server`)
-
-1. Change into the server directory:
-
-```bash
-cd server
-
-```
-
-1. Install dependencies:
-
-```bash
-npm install
-
-```
-
-1. Create a `.env` file from the example:
-
-```bash
-cp .env.example .env
-
-```
-
-1. Start the development server:
-
-```bash
-npm run dev
-
-```
-
-The GraphQL endpoint and Apollo Sandbox will be available at:
-`http://localhost:4000/graphql`
-
----
-
-### 3. Frontend Setup (`/web`)
-
-1. Open a new terminal and change into the web directory:
+### 1. Install Dependencies
 
 ```bash
 cd web
-
+npm install
 ```
 
-1. Install dependencies:
+### 2. Set Up Local Database
 
 ```bash
-npm install
+# Apply the D1 migration locally
+npm run db:migrate
 
+# Seed with demo data
+npm run db:seed
 ```
 
-1. Start the Next.js development server:
+### 3. Start Development Server
 
 ```bash
 npm run dev
-
 ```
 
-1. Open `http://localhost:3000` in your browser.
+Open `http://localhost:3000`. Join session code `SLIDODEV` to see the demo data.
+
+Demo host account: `host@slido.dev` / `password123`
 
 ---
 
-## ⚡ Features
+## Deploy to Cloudflare Pages
 
-* **Session Management:** Create new rooms with custom room codes or join existing ones.
-* **Anonymous Voting Deduplication:** Uses persistent client voter tokens in `localStorage` to allow 1 upvote per question per user.
-* **Real-Time Subscriptions:** Powered by WebSockets. New questions and upvote counts sync across all connected clients instantly without polling or manual page reloads.
-* **Type Safety:** end-to-end TypeScript integration with TypeORM schemas and TypeGraphQL decorators.
+### 1. Create D1 Database
+
+```bash
+npx wrangler d1 create slido-db
+```
+
+Update `wrangler.toml` with the returned `database_id`.
+
+### 2. Apply Migrations
+
+```bash
+npm run db:migrate:prod
+```
+
+### 3. Deploy
+
+```bash
+npm run deploy
+```
 
 ---
 
-## 📜 Available Scripts
+## Features
 
-### For Backend (`/server`)
+- **Q&A** with upvoting, moderation, highlighting, replies, and sorting (popular/recent/unanswered)
+- **Live Polls** — Multiple choice, rating, word cloud, open text, ranking
+- **Quizzes** — Timed questions with speed-based scoring and leaderboards
+- **Surveys** — Multi-question forms with multiple choice, rating, and open text
+- **Analytics Dashboard** with engagement charts and CSV export
+- **Presenter Mode** — Full-screen display for projecting live results
+- **User Authentication** — Email/password with JWT
+- **Session Ownership** — Sessions linked to authenticated users
+- **Custom Branding** — Primary color and logo per session
+- **Passcode Protection** — Optional session access control
 
-* `npm run dev` — Starts the server with `tsx watch`
-* `npm run migration:generate` — Generates a new TypeORM migration file
-* `npm run migration:run` — Runs pending database migrations
-* `npm run migration:revert` — Reverts the last applied migration
+---
 
-### For Frontend (`/web`)
+## Available Scripts
 
-* `npm run dev` — Starts Next.js development server
-* `npm run build` — Builds Next.js production build
-* `npm run start` — Starts Next.js production server
+| Script | Description |
+|--------|-------------|
+| `npm run dev` | Start Next.js dev server |
+| `npm run build` | Build for production |
+| `npm run build:cf` | Build for Cloudflare Pages |
+| `npm run preview` | Preview with Wrangler locally |
+| `npm run deploy` | Build and deploy to Cloudflare |
+| `npm run db:generate` | Generate new Drizzle migration |
+| `npm run db:migrate` | Apply migrations locally |
+| `npm run db:migrate:prod` | Apply migrations to production D1 |
+| `npm run db:seed` | Seed local DB with demo data |

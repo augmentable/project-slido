@@ -7,62 +7,28 @@ import { useMutation, useQuery } from '@apollo/client/react';
 const GET_POLL = gql`
   query GetPoll($pollId: String!) {
     poll(pollId: $pollId) {
-      id
-      type
-      question
-      isActive
-      responseCount
-      options {
-        id
-        text
-        position
-        voteCount
-      }
-      responses {
-        id
-        textValue
-      }
+      id type question isActive responseCount
+      options { id text position voteCount }
+      responses { id textValue }
     }
   }
 `;
 
 const SUBMIT_RESPONSE = gql`
-  mutation SubmitPollResponse(
-    $pollId: String!
-    $voterToken: String!
-    $selectedOptionId: String
-    $textValue: String
-    $ratingValue: Float
-    $rankingOrder: [String!]
-  ) {
-    submitPollResponse(
-      pollId: $pollId
-      voterToken: $voterToken
-      selectedOptionId: $selectedOptionId
-      textValue: $textValue
-      ratingValue: $ratingValue
-      rankingOrder: $rankingOrder
-    )
+  mutation SubmitPollResponse($pollId: String!, $voterToken: String!, $selectedOptionId: String, $textValue: String, $ratingValue: Float, $rankingOrder: [String!]) {
+    submitPollResponse(pollId: $pollId, voterToken: $voterToken, selectedOptionId: $selectedOptionId, textValue: $textValue, ratingValue: $ratingValue, rankingOrder: $rankingOrder)
   }
 `;
 
-const ACTIVATE_POLL = gql`
-  mutation ActivatePoll($pollId: String!) {
-    activatePoll(pollId: $pollId) { id isActive }
-  }
-`;
-
-const DEACTIVATE_POLL = gql`
-  mutation DeactivatePoll($pollId: String!) {
-    deactivatePoll(pollId: $pollId) { id isActive }
-  }
-`;
+const ACTIVATE_POLL = gql`mutation ActivatePoll($pollId: String!) { activatePoll(pollId: $pollId) { id isActive } }`;
+const DEACTIVATE_POLL = gql`mutation DeactivatePoll($pollId: String!) { deactivatePoll(pollId: $pollId) { id isActive } }`;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function PollCard({ poll: initialPoll, voterToken, isCreator }: { poll: any; voterToken: string; isCreator?: boolean }) {
   const { data, refetch } = useQuery(GET_POLL, {
     variables: { pollId: initialPoll.id },
     pollInterval: 3000,
+    notifyOnNetworkStatusChange: false,
   });
 
   const poll = data?.poll || initialPoll;
@@ -71,9 +37,7 @@ export function PollCard({ poll: initialPoll, voterToken, isCreator }: { poll: a
   const [ratingValue, setRatingValue] = useState(3);
   const [submitted, setSubmitted] = useState(false);
 
-  const [submitResponse] = useMutation(SUBMIT_RESPONSE, {
-    onCompleted: () => { setSubmitted(true); refetch(); },
-  });
+  const [submitResponse] = useMutation(SUBMIT_RESPONSE, { onCompleted: () => { setSubmitted(true); refetch(); } });
   const [activatePoll] = useMutation(ACTIVATE_POLL, { onCompleted: () => refetch() });
   const [deactivatePoll] = useMutation(DEACTIVATE_POLL, { onCompleted: () => refetch() });
 
@@ -81,29 +45,23 @@ export function PollCard({ poll: initialPoll, voterToken, isCreator }: { poll: a
 
   const handleSubmit = () => {
     submitResponse({
-      variables: {
-        pollId: poll.id,
-        voterToken,
-        selectedOptionId: selectedOption || null,
-        textValue: textValue || null,
-        ratingValue: poll.type === 'RATING' ? ratingValue : null,
-      },
+      variables: { pollId: poll.id, voterToken, selectedOptionId: selectedOption || null, textValue: textValue || null, ratingValue: poll.type === 'RATING' ? ratingValue : null },
     });
   };
 
   return (
-    <div className="bg-slate-800/90 border border-slate-700/60 p-4 rounded-xl space-y-3">
+    <div className="themed-card p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-200">{poll.question}</h3>
+        <h3 className="text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>{poll.question}</h3>
         <div className="flex items-center gap-2">
-          <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono ${poll.isActive ? 'bg-green-900 text-green-300' : 'bg-slate-700 text-slate-400'}`}>
+          <span className="text-[10px] px-2 py-0.5 rounded-full font-mono font-medium" style={{
+            background: poll.isActive ? 'var(--success-subtle)' : 'var(--bg-raised)',
+            color: poll.isActive ? 'var(--success)' : 'var(--text-faint)',
+          }}>
             {poll.isActive ? 'LIVE' : 'CLOSED'}
           </span>
           {isCreator && (
-            <button
-              onClick={() => poll.isActive ? deactivatePoll({ variables: { pollId: poll.id } }) : activatePoll({ variables: { pollId: poll.id } })}
-              className="text-xs text-indigo-400 hover:text-indigo-300"
-            >
+            <button onClick={() => poll.isActive ? deactivatePoll({ variables: { pollId: poll.id } }) : activatePoll({ variables: { pollId: poll.id } })} className="text-xs" style={{ color: 'var(--accent)' }}>
               {poll.isActive ? 'Close' : 'Open'}
             </button>
           )}
@@ -118,19 +76,13 @@ export function PollCard({ poll: initialPoll, voterToken, isCreator }: { poll: a
               <div key={opt.id} className="space-y-1">
                 <div className="flex items-center gap-2">
                   {poll.isActive && !submitted && (
-                    <input
-                      type="radio"
-                      name={`poll-${poll.id}`}
-                      checked={selectedOption === opt.id}
-                      onChange={() => setSelectedOption(opt.id)}
-                      className="accent-indigo-500"
-                    />
+                    <input type="radio" name={`poll-${poll.id}`} checked={selectedOption === opt.id} onChange={() => setSelectedOption(opt.id)} style={{ accentColor: 'var(--accent)' }} />
                   )}
-                  <span className="text-sm text-slate-300 flex-1">{opt.text}</span>
-                  <span className="text-xs text-slate-400 font-mono">{opt.voteCount} ({pct}%)</span>
+                  <span className="text-sm flex-1" style={{ color: 'var(--text)' }}>{opt.text}</span>
+                  <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>{opt.voteCount} ({pct}%)</span>
                 </div>
-                <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                  <div className="h-full bg-indigo-500 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
+                <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-input)' }}>
+                  <div className="h-full bar-fill rounded-full" style={{ width: `${pct}%` }} />
                 </div>
               </div>
             );
@@ -139,62 +91,35 @@ export function PollCard({ poll: initialPoll, voterToken, isCreator }: { poll: a
       ) : poll.type === 'RATING' ? (
         <div className="flex items-center gap-3">
           {[1, 2, 3, 4, 5].map((star) => (
-            <button
-              key={star}
-              type="button"
-              disabled={!poll.isActive || submitted}
-              onClick={() => setRatingValue(star)}
-              className={`text-2xl transition-colors ${star <= ratingValue ? 'text-yellow-400' : 'text-slate-600'} ${poll.isActive && !submitted ? 'hover:text-yellow-300 cursor-pointer' : ''}`}
-            >
-              ★
-            </button>
+            <button key={star} type="button" disabled={!poll.isActive || submitted} onClick={() => setRatingValue(star)}
+              className="text-2xl transition-colors cursor-pointer disabled:cursor-default"
+              style={{ color: star <= ratingValue ? 'var(--warning)' : 'var(--text-faint)' }}>★</button>
           ))}
-          <span className="text-xs text-slate-400 font-mono ml-auto">{poll.responseCount || 0} responses</span>
+          <span className="text-xs font-mono ml-auto" style={{ color: 'var(--text-muted)' }}>{poll.responseCount || 0} responses</span>
         </div>
       ) : poll.type === 'WORD_CLOUD' ? (
         <div className="space-y-3">
           <WordCloud responses={poll.responses || []} />
           {poll.isActive && !submitted && (
-            <input
-              type="text"
-              placeholder="Enter a word..."
-              value={textValue}
-              onChange={(e) => setTextValue(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
+            <input type="text" placeholder="Enter a word..." value={textValue} onChange={(e) => setTextValue(e.target.value)} className="themed-input w-full" />
           )}
-          <span className="text-xs text-slate-400 font-mono">{poll.responseCount || 0} responses</span>
+          <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>{poll.responseCount || 0} responses</span>
         </div>
       ) : poll.type === 'OPEN_TEXT' ? (
         <div className="space-y-2">
           {poll.isActive && !submitted && (
-            <input
-              type="text"
-              placeholder="Type your answer..."
-              value={textValue}
-              onChange={(e) => setTextValue(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
+            <input type="text" placeholder="Type your answer..." value={textValue} onChange={(e) => setTextValue(e.target.value)} className="themed-input w-full" />
           )}
-          <span className="text-xs text-slate-400 font-mono">{poll.responseCount || 0} responses</span>
+          <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>{poll.responseCount || 0} responses</span>
         </div>
       ) : null}
 
       {poll.isActive && !submitted && (
-        <button
-          onClick={handleSubmit}
-          disabled={
-            (poll.type === 'MULTIPLE_CHOICE' && !selectedOption) &&
-            (poll.type !== 'RATING' && poll.type !== 'WORD_CLOUD' && poll.type !== 'OPEN_TEXT')
-          }
-          className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 rounded-lg transition-colors text-sm disabled:opacity-50"
-        >
-          Submit Vote
-        </button>
+        <button onClick={handleSubmit}
+          disabled={(poll.type === 'MULTIPLE_CHOICE' && !selectedOption) && (poll.type !== 'RATING' && poll.type !== 'WORD_CLOUD' && poll.type !== 'OPEN_TEXT')}
+          className="themed-btn w-full">Submit Vote</button>
       )}
-      {submitted && (
-        <p className="text-xs text-green-400 text-center">Response submitted!</p>
-      )}
+      {submitted && <p className="text-xs text-center" style={{ color: 'var(--success)' }}>Response submitted!</p>}
     </div>
   );
 }
@@ -203,30 +128,19 @@ function WordCloud({ responses }: { responses: { textValue: string | null }[] })
   const wordCounts = new Map<string, number>();
   for (const r of responses) {
     if (!r.textValue) continue;
-    const word = r.textValue.toLowerCase().trim();
-    wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
+    wordCounts.set(r.textValue.toLowerCase().trim(), (wordCounts.get(r.textValue.toLowerCase().trim()) || 0) + 1);
   }
-
-  if (wordCounts.size === 0) {
-    return <p className="text-xs text-slate-500 text-center py-4">No words yet</p>;
-  }
+  if (wordCounts.size === 0) return <p className="text-xs text-center py-4" style={{ color: 'var(--text-faint)' }}>No words yet</p>;
 
   const entries = [...wordCounts.entries()].sort((a, b) => b[1] - a[1]);
   const maxCount = entries[0][1];
-  const colors = ['text-indigo-400', 'text-blue-400', 'text-purple-400', 'text-pink-400', 'text-cyan-400', 'text-emerald-400', 'text-amber-400', 'text-rose-400'];
 
   return (
-    <div className="flex flex-wrap items-center justify-center gap-2 py-4 bg-slate-900/50 rounded-lg px-4 min-h-20">
-      {entries.map(([word, count], i) => {
+    <div className="flex flex-wrap items-center justify-center gap-2 py-4 px-4 min-h-20 rounded-lg" style={{ background: 'var(--bg-input)' }}>
+      {entries.map(([word, count]) => {
         const scale = 0.75 + (count / maxCount) * 1.25;
-        const colorClass = colors[i % colors.length];
         return (
-          <span
-            key={word}
-            className={`font-bold transition-all ${colorClass}`}
-            style={{ fontSize: `${scale}rem`, opacity: 0.6 + (count / maxCount) * 0.4 }}
-            title={`${word}: ${count}`}
-          >
+          <span key={word} className="font-bold transition-all" style={{ fontSize: `${scale}rem`, color: 'var(--accent)', opacity: 0.5 + (count / maxCount) * 0.5 }} title={`${word}: ${count}`}>
             {word}
           </span>
         );

@@ -1,84 +1,99 @@
 import { NextResponse } from 'next/server';
+import { getDb, type Db } from '@/db';
+import * as s from '@/db/schema';
+import { eq, count, avg } from 'drizzle-orm';
 
-const EXPORT_QUERY = `
-  query ExportData($sessionId: String!) {
-    sessionAnalytics(sessionId: $sessionId) {
-      totalParticipants totalQuestions totalUpvotes
-      totalPolls totalPollResponses totalQuizzes
-      quizAverageScore totalSurveys totalSurveyResponses
-    }
+async function getDbInstance(): Promise<Db> {
+  try {
+    const { getCloudflareContext } = await import('@opennextjs/cloudflare');
+    const ctx = await getCloudflareContext();
+    return getDb(ctx.env.DB);
+  } catch {
+    const { default: Database } = await import('better-sqlite3');
+    const { readdirSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const d1Dir = join(process.cwd(), '.wrangler/state/v3/d1/miniflare-D1DatabaseObject');
+    const files = readdirSync(d1Dir).filter((f: string) => f.endsWith('.sqlite') && f !== 'metadata.sqlite');
+    if (!files.length) throw new Error('No local D1 database found.');
+    const sqliteDb = new Database(join(d1Dir, files[0]));
+    const { drizzle } = await import('drizzle-orm/better-sqlite3');
+    const schemaImport = await import('@/db/schema');
+    return drizzle(sqliteDb, { schema: schemaImport }) as unknown as Db;
   }
-`;
-
-const SESSION_DETAIL_QUERY = `
-  query SessionDetailExport($code: String!) {
-    session(code: $code) {
-      id title code
-      questions { id text authorName isAnswered upvoteCount createdAt replies { text authorName } }
-      polls { id type question options { text voteCount } }
-      surveys { id title questions { text type } }
-    }
-  }
-`;
+}
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ sessionId: string }> },
 ) {
   const { sessionId } = await params;
+  const sid = Number(sessionId);
   const url = new URL(request.url);
   const format = url.searchParams.get('format') || 'summary';
 
   try {
-    const analyticsRes = await fetch('http://localhost:8080/graphql', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: EXPORT_QUERY, variables: { sessionId } }),
-    });
-    const analyticsJson = await analyticsRes.json();
-    const analytics = analyticsJson.data?.sessionAnalytics;
-    if (!analytics) {
-      return NextResponse.json({ error: 'Session not found' }, { status: 404 });
-    }
+    const db = await getDbInstance();
+
+    const [qCount] = await db.select({ c: count() }).from(s.questions).where(eq(s.questions.sessionId, sid));
+    const [uCount] = await db.select({ c: count() }).from(s.upvotes)
+      .innerJoin(s.questions, eq(s.upvotes.questionId, s.questions.id))
+      .where(eq(s.questions.sessionId, sid));
+    const [pCount] = await db.select({ c: count() }).from(s.polls).where(eq(s.polls.sessionId, sid));
+    const [prCount] = await db.select({ c: count() }).from(s.pollResponses)
+      .innerJoin(s.polls, eq(s.pollResponses.pollId, s.polls.id))
+      .where(eq(s.polls.sessionId, sid));
+    const [qzCount] = await db.select({ c: count() }).from(s.quizzes).where(eq(s.quizzes.sessionId, sid));
+    const [avgScore] = await db.select({ a: avg(s.quizAnswers.score) }).from(s.quizAnswers)
+      .innerJoin(s.quizQuestions, eq(s.quizAnswers.quizQuestionId, s.quizQuestions.id))
+      .innerJoin(s.quizzes, eq(s.quizQuestions.quizId, s.quizzes.id))
+      .where(eq(s.quizzes.sessionId, sid));
+    const [svCount] = await db.select({ c: count() }).from(s.surveys).where(eq(s.surveys.sessionId, sid));
+    const [srCount] = await db.select({ c: count() }).from(s.surveyResponses)
+      .innerJoin(s.surveys, eq(s.surveyResponses.surveyId, s.surveys.id))
+      .where(eq(s.surveys.sessionId, sid));
 
     const rows: string[][] = [['Metric', 'Value']];
     rows.push(
-      ['Total Participants', analytics.totalParticipants],
-      ['Total Questions', analytics.totalQuestions],
-      ['Total Upvotes', analytics.totalUpvotes],
-      ['Total Polls', analytics.totalPolls],
-      ['Total Poll Responses', analytics.totalPollResponses],
-      ['Total Quizzes', analytics.totalQuizzes],
-      ['Average Quiz Score', Math.round(analytics.quizAverageScore).toString()],
-      ['Total Surveys', analytics.totalSurveys],
-      ['Total Survey Responses', analytics.totalSurveyResponses],
+      ['Total Questions', String(qCount.c)],
+      ['Total Upvotes', String(uCount.c)],
+      ['Total Polls', String(pCount.c)],
+      ['Total Poll Responses', String(prCount.c)],
+      ['Total Quizzes', String(qzCount.c)],
+      ['Average Quiz Score', String(Math.round(Number(avgScore.a) || 0))],
+      ['Total Surveys', String(svCount.c)],
+      ['Total Survey Responses', String(srCount.c)],
     );
 
     if (format === 'full') {
       rows.push([], ['--- QUESTIONS ---']);
-      rows.push(['ID', 'Text', 'Author', 'Upvotes', 'Answered', 'Replies']);
+      rows.push(['ID', 'Text', 'Author', 'Upvotes', 'Answered']);
 
-      const detailRes = await fetch('http://localhost:8080/graphql', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: SESSION_DETAIL_QUERY, variables: { code: '' } }),
+      const questionsList = await db.query.questions.findMany({
+        where: eq(s.questions.sessionId, sid),
+        with: { replies: true, upvotes: true },
       });
-      const detailJson = await detailRes.json();
-      const session = detailJson.data?.session;
-      if (session?.questions) {
-        for (const q of session.questions) {
-          const replyTexts = q.replies?.map((r: { authorName: string; text: string }) => `${r.authorName}: ${r.text}`).join(' | ') || '';
-          rows.push([q.id, `"${q.text}"`, q.authorName || 'Anonymous', q.upvoteCount, q.isAnswered ? 'Yes' : 'No', `"${replyTexts}"`]);
-        }
+
+      for (const q of questionsList) {
+        rows.push([
+          String(q.id),
+          `"${q.text}"`,
+          q.authorName || 'Anonymous',
+          String(q.upvotes.length),
+          q.isAnswered ? 'Yes' : 'No',
+        ]);
       }
 
       rows.push([], ['--- POLLS ---']);
       rows.push(['ID', 'Type', 'Question', 'Options & Votes']);
-      if (session?.polls) {
-        for (const p of session.polls) {
-          const optionInfo = p.options?.map((o: { text: string; voteCount: number }) => `${o.text}(${o.voteCount})`).join(', ') || '';
-          rows.push([p.id, p.type, `"${p.question}"`, `"${optionInfo}"`]);
-        }
+
+      const pollsList = await db.query.polls.findMany({
+        where: eq(s.polls.sessionId, sid),
+        with: { options: true },
+      });
+
+      for (const p of pollsList) {
+        const optInfo = p.options.map((o) => `${o.text}`).join(', ');
+        rows.push([String(p.id), p.type, `"${p.question}"`, `"${optInfo}"`]);
       }
     }
 
@@ -91,6 +106,6 @@ export async function GET(
       },
     });
   } catch {
-    return NextResponse.json({ error: 'Failed to fetch analytics' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to generate export' }, { status: 500 });
   }
 }

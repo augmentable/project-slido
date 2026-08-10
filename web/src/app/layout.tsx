@@ -1,21 +1,11 @@
 import type { Metadata } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import { ApolloWrapper } from '../components/ApolloWrapper';
-
-const geistSans = Geist({
-  variable: '--font-geist-sans',
-  subsets: ['latin'],
-});
-
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-});
+import { ThemeProvider } from '../components/ThemeProvider';
 
 export const metadata: Metadata = {
-  title: 'Live Slido Clone',
-  description: 'Real-time Q&A and Polling powered by GraphQL',
+  title: 'Slido Clone — Live Q&A & Polls',
+  description: 'Real-time audience interaction with Q&A, polls, quizzes & surveys',
 };
 
 export default function RootLayout({
@@ -24,12 +14,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">
-        <ApolloWrapper>{children}</ApolloWrapper>
+    <html lang="en" data-theme="nightowl">
+      <head>
+        <link
+          href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&f[]=cabinet-grotesk@700,800&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className="min-h-screen" style={{ fontFamily: "'Satoshi', system-ui, sans-serif" }}>
+        <ThemeProvider>
+          <ApolloWrapper>{children}</ApolloWrapper>
+        </ThemeProvider>
       </body>
     </html>
   );
