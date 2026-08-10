@@ -14,8 +14,8 @@ const GET_LEADERBOARD = gql`query GetLeaderboard($quizId: String!) { quizLeaderb
 export function QuizPlayer({ quiz: initialQuiz, voterToken, isCreator }: { quiz: any; voterToken: string; isCreator?: boolean }) {
   const { data, refetch } = useQuery(GET_QUIZ, { variables: { quizId: initialQuiz.id }, pollInterval: 2000, notifyOnNetworkStatusChange: false });
   const { data: lbData, refetch: refetchLb } = useQuery(GET_LEADERBOARD, { variables: { quizId: initialQuiz.id }, pollInterval: 3000, notifyOnNetworkStatusChange: false });
-  const quiz = data?.quiz || initialQuiz;
-  const leaderboard = lbData?.quizLeaderboard || [];
+  const quiz = (data as any)?.quiz || initialQuiz;
+  const leaderboard = (lbData as any)?.quizLeaderboard || [];
 
   const [startMs, setStartMs] = useState(0);
   const [answered, setAnswered] = useState(false);
@@ -28,7 +28,7 @@ export function QuizPlayer({ quiz: initialQuiz, voterToken, isCreator }: { quiz:
   useEffect(() => { if (currentQ) { setStartMs(Date.now()); setAnswered(false); setLastResult(null); setTimeLeft(currentQ.timeLimit); } }, [currentQ?.id]);
   useEffect(() => { if (!currentQ || answered) return; const iv = setInterval(() => { setTimeLeft((t: number) => { if (t <= 1) { clearInterval(iv); return 0; } return t - 1; }); }, 1000); return () => clearInterval(iv); }, [currentQ?.id, answered]);
 
-  const [submitAnswer] = useMutation(SUBMIT_ANSWER, { onCompleted: (data) => { setLastResult(data.submitQuizAnswer); setAnswered(true); refetchLb(); }, onError: () => setAnswered(true) });
+  const [submitAnswer] = useMutation(SUBMIT_ANSWER, { onCompleted: (data: any) => { setLastResult(data.submitQuizAnswer); setAnswered(true); refetchLb(); }, onError: () => setAnswered(true) });
   const [startQuiz] = useMutation(START_QUIZ, { onCompleted: () => refetch() });
   const [nextQuestion] = useMutation(NEXT_QUESTION, { onCompleted: () => refetch() });
 

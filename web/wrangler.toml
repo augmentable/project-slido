@@ -1,8 +1,13 @@
 name = "slido-clone"
 compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+main = ".open-next/worker.js"
+
+[assets]
+directory = ".open-next/assets"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "slido-db"
-database_id = "local"
+database_id = "44b833c4-9772-4806-a781-3588914ad0c4"
 migrations_dir = "drizzle"

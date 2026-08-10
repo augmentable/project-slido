@@ -16,7 +16,7 @@ export function QuizCreator({ sessionId, onCreated }: { sessionId: string; onCre
   const [correctIndex, setCorrectIndex] = useState(0);
   const [timeLimit, setTimeLimit] = useState(20);
   const [questionsAdded, setQuestionsAdded] = useState(0);
-  const [createQuiz] = useMutation(CREATE_QUIZ, { onCompleted: (data) => { setQuizId(data.createQuiz.id); setStep('questions'); } });
+  const [createQuiz] = useMutation(CREATE_QUIZ, { onCompleted: (data: any) => { setQuizId(data.createQuiz.id); setStep('questions'); } });
   const [addQuestion, { loading }] = useMutation(ADD_QUIZ_QUESTION, { onCompleted: () => { setQuestionText(''); setOptions(['', '', '', '']); setCorrectIndex(0); setQuestionsAdded((n) => n + 1); } });
 
   if (step === 'title') {

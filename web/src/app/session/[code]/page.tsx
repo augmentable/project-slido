@@ -89,7 +89,7 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
     skip: !session?.id || !session?.isModerated,
     pollInterval: 5000,
   });
-  const pendingQuestions = pendingData?.pendingQuestions || [];
+  const pendingQuestions = (pendingData as any)?.pendingQuestions || [];
 
   const [createQuestion, { loading: posting }] = useMutation(CREATE_QUESTION, { onCompleted: () => { setQuestionText(''); refetch(); } });
   const [upvoteQuestion] = useMutation(UPVOTE_QUESTION, { onCompleted: () => refetch() });

@@ -70,7 +70,7 @@ export default function HomePage() {
   useEffect(() => {
     const token = localStorage.getItem('slido_auth_token');
     if (token) {
-      getMe({ variables: { token } }).then(({ data }) => {
+      getMe({ variables: { token } }).then(({ data }: { data: any }) => {
         if (data?.me) setCurrentUser(data.me);
         else localStorage.removeItem('slido_auth_token');
       });
@@ -82,11 +82,11 @@ export default function HomePage() {
     setErrorMsg('');
     try {
       if (authMode === 'login') {
-        const { data } = await login({ variables: { email: authEmail, password: authPassword } });
+        const { data }: any = await login({ variables: { email: authEmail, password: authPassword } });
         localStorage.setItem('slido_auth_token', data.login.token);
         setCurrentUser(data.login.user);
       } else {
-        const { data } = await register({ variables: { email: authEmail, password: authPassword, displayName: authName } });
+        const { data }: any = await register({ variables: { email: authEmail, password: authPassword, displayName: authName } });
         localStorage.setItem('slido_auth_token', data.register.token);
         setCurrentUser(data.register.user);
       }
@@ -110,7 +110,7 @@ export default function HomePage() {
     if (!joinCode.trim()) return;
     setErrorMsg('');
     const codeFormatted = joinCode.trim().toUpperCase();
-    const { data } = await getSession({ variables: { code: codeFormatted, passcode: joinPasscode || null } });
+    const { data }: any = await getSession({ variables: { code: codeFormatted, passcode: joinPasscode || null } });
     if (data?.session) {
       router.push(`/session/${codeFormatted}`);
     } else if (!needsPasscode) {

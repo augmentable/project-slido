@@ -31,7 +31,7 @@ export function PollCard({ poll: initialPoll, voterToken, isCreator }: { poll: a
     notifyOnNetworkStatusChange: false,
   });
 
-  const poll = data?.poll || initialPoll;
+  const poll = (data as any)?.poll || initialPoll;
   const [selectedOption, setSelectedOption] = useState('');
   const [textValue, setTextValue] = useState('');
   const [ratingValue, setRatingValue] = useState(3);

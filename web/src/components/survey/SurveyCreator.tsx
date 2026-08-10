@@ -22,7 +22,7 @@ export function SurveyCreator({ sessionId, onCreated }: { sessionId: string; onC
   const [options, setOptions] = useState(['', '']);
   const [isRequired, setIsRequired] = useState(false);
   const [questionsAdded, setQuestionsAdded] = useState(0);
-  const [createSurvey] = useMutation(CREATE_SURVEY, { onCompleted: (data) => { setSurveyId(data.createSurvey.id); setStep('questions'); } });
+  const [createSurvey] = useMutation(CREATE_SURVEY, { onCompleted: (data: any) => { setSurveyId(data.createSurvey.id); setStep('questions'); } });
   const [addQuestion, { loading }] = useMutation(ADD_SURVEY_QUESTION, { onCompleted: () => { setQText(''); setOptions(['', '']); setQuestionsAdded((n) => n + 1); } });
 
   if (step === 'title') {

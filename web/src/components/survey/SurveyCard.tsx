@@ -11,7 +11,7 @@ const CLOSE_SURVEY = gql`mutation CloseSurvey($surveyId: String!) { closeSurvey(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function SurveyCard({ survey: initialSurvey, voterToken, isCreator }: { survey: any; voterToken: string; isCreator?: boolean }) {
   const { data, refetch } = useQuery(GET_SURVEY, { variables: { surveyId: initialSurvey.id } });
-  const survey = data?.survey || initialSurvey;
+  const survey = (data as any)?.survey || initialSurvey;
   const [answers, setAnswers] = useState<Record<string, { selectedOptionId?: string; textValue?: string; ratingValue?: number }>>({});
   const [submitted, setSubmitted] = useState(false);
   const [submitSurvey, { loading }] = useMutation(SUBMIT_SURVEY, { onCompleted: () => { setSubmitted(true); refetch(); } });
