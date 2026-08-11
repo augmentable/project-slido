@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { gql } from '@apollo/client';
 import { useLazyQuery, useMutation } from '@apollo/client/react';
 import { ThemePicker } from '@/components/ThemePicker';
@@ -12,6 +13,12 @@ const CREATE_SESSION = gql`
     createSession(title: $title, code: $code, isModerated: $isModerated, passcode: $passcode, authToken: $authToken) {
       id title code
     }
+  }
+`;
+
+const CHECK_SESSION = gql`
+  query CheckSession($code: String!) {
+    checkSession(code: $code) { exists isPasswordProtected }
   }
 `;
 
@@ -62,6 +69,7 @@ export default function HomePage() {
   const [currentUser, setCurrentUser] = useState<{ id: string; displayName: string; email: string } | null>(null);
 
   const [createSession, { loading: creating }] = useMutation(CREATE_SESSION);
+  const [checkSession] = useLazyQuery(CHECK_SESSION);
   const [getSession, { loading: checking }] = useLazyQuery(GET_SESSION);
   const [login] = useMutation(LOGIN);
   const [register] = useMutation(REGISTER);
@@ -110,14 +118,26 @@ export default function HomePage() {
     if (!joinCode.trim()) return;
     setErrorMsg('');
     const codeFormatted = joinCode.trim().toUpperCase();
+
+    if (!needsPasscode) {
+      const { data: checkData }: any = await checkSession({ variables: { code: codeFormatted } });
+      const info = checkData?.checkSession;
+      if (!info?.exists) {
+        setErrorMsg(`Session "${codeFormatted}" not found.`);
+        return;
+      }
+      if (info.isPasswordProtected) {
+        setNeedsPasscode(true);
+        setErrorMsg('This session requires a passcode.');
+        return;
+      }
+    }
+
     const { data }: any = await getSession({ variables: { code: codeFormatted, passcode: joinPasscode || null } });
     if (data?.session) {
       router.push(`/session/${codeFormatted}`);
-    } else if (!needsPasscode) {
-      setNeedsPasscode(true);
-      setErrorMsg('This session may require a passcode.');
     } else {
-      setErrorMsg(`Session "${codeFormatted}" not found or incorrect passcode.`);
+      setErrorMsg(needsPasscode ? 'Incorrect passcode.' : `Session "${codeFormatted}" not found.`);
     }
   };
 
@@ -143,7 +163,10 @@ export default function HomePage() {
 
         {/* Top bar */}
         <div className="flex items-center justify-between animate-fade-in">
-          <ThemePicker current={theme} onChange={setTheme} />
+          <div className="flex items-center gap-3">
+            <ThemePicker current={theme} onChange={setTheme} />
+            <Link href="/docs" className="text-xs font-medium hover:underline" style={{ color: 'var(--text-muted)' }}>Docs</Link>
+          </div>
           {currentUser ? (
             <div className="flex items-center gap-3">
               <span className="text-sm" style={{ color: 'var(--accent)' }}>{currentUser.displayName}</span>
@@ -211,7 +234,7 @@ export default function HomePage() {
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="Enter code e.g. SLIDODEV"
+                placeholder="Enter code e.g. AGENTNEWS"
                 value={joinCode}
                 onChange={(e) => setJoinCode(e.target.value)}
                 className="themed-input flex-1 uppercase tracking-widest font-mono text-sm"

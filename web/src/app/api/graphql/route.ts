@@ -192,8 +192,14 @@ const schema = createSchema({
       ratingValue: Int
     }
 
+    type SessionCheck {
+      exists: Boolean!
+      isPasswordProtected: Boolean!
+    }
+
     type Query {
       me(token: String!): User
+      checkSession(code: String!): SessionCheck!
       session(code: String!, passcode: String): Session
       pendingQuestions(sessionId: String!): [Question!]!
       poll(pollId: String!): Poll
@@ -244,6 +250,17 @@ const schema = createSchema({
       },
 
       // ── Session ──
+      checkSession: async (_: unknown, { code }: { code: string }, { db }: Ctx) => {
+        const sanitized = code.trim().toUpperCase().slice(0, MAX_CODE_LENGTH);
+        if (!CODE_PATTERN.test(sanitized)) return { exists: false, isPasswordProtected: false };
+        const row = await db.query.sessions.findFirst({
+          where: eq(s.sessions.code, sanitized),
+          columns: { id: true, passcodeHash: true },
+        });
+        if (!row) return { exists: false, isPasswordProtected: false };
+        return { exists: true, isPasswordProtected: !!row.passcodeHash };
+      },
+
       session: async (_: unknown, { code, passcode }: { code: string; passcode?: string }, { db }: Ctx) => {
         const sanitized = code.trim().toUpperCase().slice(0, MAX_CODE_LENGTH);
         if (!CODE_PATTERN.test(sanitized)) return null;
