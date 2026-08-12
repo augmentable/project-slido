@@ -269,8 +269,8 @@ const schema = createSchema({
           where: eq(s.sessions.code, sanitized),
           with: {
             owner: true,
-            questions: { with: { replies: true }, orderBy: [desc(s.questions.createdAt)] },
-            polls: { with: { options: true } },
+            questions: { with: { replies: true, upvotes: true }, orderBy: [desc(s.questions.createdAt)] },
+            polls: { with: { options: true, responses: { with: { selectedOption: true } } } },
             quizzes: { with: { questions: { with: { options: true }, orderBy: [asc(s.quizQuestions.position)] } } },
             surveys: { with: { questions: { with: { options: true }, orderBy: [asc(s.surveyQuestions.position)] } } },
           },
@@ -287,7 +287,21 @@ const schema = createSchema({
           questionsList = questionsList.filter((q) => q.isApproved);
         }
 
-        return { ...result, isPasswordProtected: !!result.passcodeHash, questions: questionsList };
+        const questionsWithCounts = questionsList.map((q) => ({
+          ...q,
+          _upvoteCount: q.upvotes?.length ?? 0,
+        }));
+
+        const pollsWithCounts = (result.polls || []).map((p) => ({
+          ...p,
+          _responseCount: p.responses?.length ?? 0,
+          options: (p.options || []).map((o) => ({
+            ...o,
+            _voteCount: p.responses?.filter((r) => r.selectedOptionId === o.id).length ?? 0,
+          })),
+        }));
+
+        return { ...result, isPasswordProtected: !!result.passcodeHash, questions: questionsWithCounts, polls: pollsWithCounts };
       },
 
       pendingQuestions: async (_: unknown, { sessionId }: { sessionId: string }, { db }: Ctx) => {
@@ -756,7 +770,8 @@ const schema = createSchema({
 
     // ── Field Resolvers ──
     Question: {
-      upvoteCount: async (parent: { id: number }, _: unknown, { db }: Ctx) => {
+      upvoteCount: async (parent: { id: number; _upvoteCount?: number }, _: unknown, { db }: Ctx) => {
+        if (parent._upvoteCount !== undefined) return parent._upvoteCount;
         const [result] = await db.select({ c: count() }).from(s.upvotes).where(eq(s.upvotes.questionId, parent.id));
         return result.c;
       },
@@ -767,14 +782,16 @@ const schema = createSchema({
     },
 
     Poll: {
-      responseCount: async (parent: { id: number }, _: unknown, { db }: Ctx) => {
+      responseCount: async (parent: { id: number; _responseCount?: number }, _: unknown, { db }: Ctx) => {
+        if (parent._responseCount !== undefined) return parent._responseCount;
         const [result] = await db.select({ c: count() }).from(s.pollResponses).where(eq(s.pollResponses.pollId, parent.id));
         return result.c;
       },
     },
 
     PollOption: {
-      voteCount: async (parent: { id: number }, _: unknown, { db }: Ctx) => {
+      voteCount: async (parent: { id: number; _voteCount?: number }, _: unknown, { db }: Ctx) => {
+        if (parent._voteCount !== undefined) return parent._voteCount;
         const [result] = await db.select({ c: count() }).from(s.pollResponses).where(eq(s.pollResponses.selectedOptionId, parent.id));
         return result.c;
       },

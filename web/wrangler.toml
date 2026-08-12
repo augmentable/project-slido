@@ -11,3 +11,10 @@ binding = "DB"
 database_name = "slido-db"
 database_id = "44b833c4-9772-4806-a781-3588914ad0c4"
 migrations_dir = "drizzle"
+
+[observability]
+enabled = true
+head_sampling_rate = 0.01
+
+[limits]
+cpu_ms = 300_000

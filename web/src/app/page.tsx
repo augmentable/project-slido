@@ -48,6 +48,14 @@ const ME = gql`
   }
 `;
 
+interface User { id: string; displayName: string; email: string }
+interface AuthPayload { token: string; user: User }
+interface MeData { me: User | null }
+interface LoginData { login: AuthPayload }
+interface RegisterData { register: AuthPayload }
+interface CheckSessionData { checkSession: { exists: boolean; isPasswordProtected: boolean } }
+interface GetSessionData { session: { id: string; code: string; title: string; isPasswordProtected: boolean } | null }
+
 export default function HomePage() {
   const router = useRouter();
   const { theme, setTheme } = useTheme();
@@ -78,7 +86,8 @@ export default function HomePage() {
   useEffect(() => {
     const token = localStorage.getItem('slido_auth_token');
     if (token) {
-      getMe({ variables: { token } }).then(({ data }: { data: any }) => {
+      getMe({ variables: { token } }).then((result) => {
+        const data = result.data as MeData | undefined;
         if (data?.me) setCurrentUser(data.me);
         else localStorage.removeItem('slido_auth_token');
       });
@@ -90,11 +99,13 @@ export default function HomePage() {
     setErrorMsg('');
     try {
       if (authMode === 'login') {
-        const { data }: any = await login({ variables: { email: authEmail, password: authPassword } });
+        const { data } = await login({ variables: { email: authEmail, password: authPassword } }) as { data?: LoginData };
+        if (!data) throw new Error('Authentication failed');
         localStorage.setItem('slido_auth_token', data.login.token);
         setCurrentUser(data.login.user);
       } else {
-        const { data }: any = await register({ variables: { email: authEmail, password: authPassword, displayName: authName } });
+        const { data } = await register({ variables: { email: authEmail, password: authPassword, displayName: authName } }) as { data?: RegisterData };
+        if (!data) throw new Error('Registration failed');
         localStorage.setItem('slido_auth_token', data.register.token);
         setCurrentUser(data.register.user);
       }
@@ -120,7 +131,7 @@ export default function HomePage() {
     const codeFormatted = joinCode.trim().toUpperCase();
 
     if (!needsPasscode) {
-      const { data: checkData }: any = await checkSession({ variables: { code: codeFormatted } });
+      const { data: checkData } = await checkSession({ variables: { code: codeFormatted } }) as { data?: CheckSessionData };
       const info = checkData?.checkSession;
       if (!info?.exists) {
         setErrorMsg(`Session "${codeFormatted}" not found.`);
@@ -133,7 +144,7 @@ export default function HomePage() {
       }
     }
 
-    const { data }: any = await getSession({ variables: { code: codeFormatted, passcode: joinPasscode || null } });
+    const { data } = await getSession({ variables: { code: codeFormatted, passcode: joinPasscode || null } }) as { data?: GetSessionData };
     if (data?.session) {
       router.push(`/session/${codeFormatted}`);
     } else {
