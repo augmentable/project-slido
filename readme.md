@@ -1,5 +1,7 @@
 # Real-Time Slido Clone
 
+> **Origin:** This repo started as a fork of [bineetNaidu/slido-clone](https://github.com/bineetNaidu/slido-clone), which used TypeGraphQL, TypeORM, and PostgreSQL with a separate Express/Apollo Server backend. It has since been rewritten to run entirely on Cloudflare's edge — replacing PostgreSQL with D1, TypeORM with Drizzle, and the standalone server with a Next.js Route Handler.
+
 A full-stack, real-time Q&A and interactive polling application built with **Next.js**, **GraphQL Yoga**, **Drizzle ORM**, and **Cloudflare D1**. Deployable to **Cloudflare Pages** with zero Docker or Postgres dependencies.
 
 Audience members join sessions via room codes, post questions, vote in polls, take quizzes, and complete surveys. Updates sync across all clients via polling.
