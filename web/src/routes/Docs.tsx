@@ -1,7 +1,5 @@
-'use client';
-
 import { useState } from 'react';
-import Link from 'next/link';
+import { Link } from 'react-router';
 import { ThemePicker } from '@/components/ThemePicker';
 import { useTheme } from '@/components/ThemeProvider';
 
@@ -25,12 +23,12 @@ export default function DocsPage() {
       <div className="max-w-4xl w-full space-y-8">
         <div className="flex items-start justify-between animate-fade-in">
           <div>
-            <Link href="/" className="text-xs font-medium tracking-wider uppercase hover:underline" style={{ color: 'var(--accent)' }}>&larr; Home</Link>
+            <Link to="/" className="text-xs font-medium tracking-wider uppercase hover:underline" style={{ color: 'var(--accent)' }}>&larr; Home</Link>
             <h1 className="text-3xl md:text-4xl font-black mt-3" style={{ fontFamily: "'Cabinet Grotesk', sans-serif", color: 'var(--text-strong)' }}>
               Architecture <span style={{ color: 'var(--accent)' }}>Deep Dive</span>
             </h1>
             <p className="text-sm mt-2" style={{ color: 'var(--text-muted)' }}>
-              Next.js + GraphQL Yoga + Drizzle ORM + Cloudflare D1
+              Vite + Hono + GraphQL Yoga + Drizzle ORM + Cloudflare D1
             </p>
           </div>
           <ThemePicker current={theme} onChange={setTheme} />
@@ -159,8 +157,6 @@ function FlowDiagram({ steps, color }: { steps: string[]; color?: string }) {
   );
 }
 
-/* ─── Collapsible ─── */
-
 function Collapsible({ title, badge, children, defaultOpen = false }: { title: string; badge?: string; children: React.ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -174,8 +170,6 @@ function Collapsible({ title, badge, children, defaultOpen = false }: { title: s
     </div>
   );
 }
-
-/* ─── Section Content ─── */
 
 function OverviewSection() {
   return (
@@ -200,14 +194,15 @@ function OverviewSection() {
         <DataTable
           headers={['Layer', 'Technology', 'Role']}
           rows={[
-            ['Framework', 'Next.js 16 (App Router)', 'SSR/CSR, routing, API route handler'],
+            ['Frontend', 'Vite + React', 'SPA with client-side routing'],
+            ['Routing', 'React Router v7', 'Declarative client-side routes'],
             ['Real-time', 'Durable Objects (SessionDO)', 'Per-session WebSocket hub with in-memory state'],
-            ['API', 'GraphQL Yoga', 'Schema-first GraphQL at /api/graphql (host ops)'],
+            ['API', 'Hono + GraphQL Yoga', 'Worker entry point + schema-first GraphQL at /api/graphql'],
             ['Client', 'Apollo Client 4 + WebSocket', 'WS primary, Apollo 3s polling fallback'],
             ['ORM', 'Drizzle ORM', 'Type-safe schema, relational queries, migrations'],
             ['Database', 'Cloudflare D1 (SQLite)', 'Edge-located, zero-config SQL'],
             ['Auth', 'JWT (jsonwebtoken)', 'Stateless 7-day tokens, SHA-256 passwords'],
-            ['Deploy', '@opennextjs/cloudflare', 'Adapts Next.js to Cloudflare Workers'],
+            ['Deploy', 'Cloudflare Workers', 'Direct Hono worker — no adapter needed'],
             ['Styling', 'Tailwind CSS 4', 'Utility-first with CSS custom properties'],
             ['Theming', 'CSS variables + React context', '3 switchable themes (Night Owl, Paper, Electric)'],
             ['Typography', 'Satoshi + Cabinet Grotesk', 'Loaded via Fontshare CDN'],
@@ -323,9 +318,9 @@ function OrmSection() {
       </DocCard>
 
       <DocCard>
-        <SubTitle>Dual-Mode DB Context</SubTitle>
+        <SubTitle>DB Context in Hono</SubTitle>
         <Prose>
-          The GraphQL route resolves the database at runtime. On Cloudflare, it reads the D1 binding from <Mono>getCloudflareContext().env.DB</Mono>. In local dev, it falls back to better-sqlite3 against the local <Mono>.wrangler/state/</Mono> SQLite file.
+          The Hono worker passes <Mono>c.env.DB</Mono> (the D1 binding) to GraphQL Yoga via context. The Drizzle client is created per-request with <Mono>getDb(c.env.DB)</Mono>. No fallback to better-sqlite3 is needed — <Mono>wrangler dev</Mono> provides a local D1 binding natively.
         </Prose>
       </DocCard>
 
@@ -356,7 +351,7 @@ function GraphQLSection() {
       <DocCard>
         <SectionTitle>GraphQL API Layer</SectionTitle>
         <Prose>
-          A single Next.js Route Handler at <Mono>/api/graphql</Mono> delegates to GraphQL Yoga. Schema-first — the SDL and resolvers are co-located in route.ts (~860 lines). Each resolver makes direct Drizzle queries; there is no DataLoader or batching layer.
+          A Hono route at <Mono>/api/graphql</Mono> delegates to GraphQL Yoga. Schema-first — the SDL and resolvers are co-located in <Mono>src/api/graphql.ts</Mono> (~860 lines). Each resolver makes direct Drizzle queries; there is no DataLoader or batching layer.
         </Prose>
       </DocCard>
 
@@ -437,12 +432,12 @@ function FlowSection() {
 
       <DocCard>
         <SubTitle>Real-Time Path (WebSocket via Durable Object)</SubTitle>
-        <FlowDiagram steps={['Browser (WS)', 'Worker (Router)', 'SessionDO', 'Broadcast']} color="var(--success)" />
+        <FlowDiagram steps={['Browser (WS)', 'Hono Worker', 'SessionDO', 'Broadcast']} color="var(--success)" />
         <DataTable
           headers={['Step', 'Layer', 'What happens']}
           rows={[
             ['1', 'React hook', 'Session page opens. useSessionSocket connects via WS to /?code=SLIDODEV.'],
-            ['2', 'Worker fetch', 'Detects Upgrade: websocket header, routes to DO via env.SESSION_DO.get(id).'],
+            ['2', 'Hono worker', 'Detects Upgrade: websocket header, routes to DO via env.SESSION_DO.get(id).'],
             ['3', 'SessionDO.fetch', 'Creates WebSocketPair, calls ctx.acceptWebSocket (Hibernation API).'],
             ['4', 'SessionDO', 'Loads full state from D1 (first access — cached thereafter). Sends initial state.'],
             ['5', 'User action', 'Client sends { type: "upvote", questionId, voterToken } over WebSocket.'],
@@ -455,7 +450,7 @@ function FlowSection() {
 
       <DocCard>
         <SubTitle>GraphQL Path (HTTP — fallback + host operations)</SubTitle>
-        <FlowDiagram steps={['React UI', 'Apollo Client', 'Next.js Route', 'GraphQL Yoga', 'Drizzle ORM', 'D1']} />
+        <FlowDiagram steps={['React UI', 'Apollo Client', 'Hono Route', 'GraphQL Yoga', 'Drizzle ORM', 'D1']} />
         <Prose>
           Used for: auth, session creation/branding, quiz/poll/survey authoring, moderation, analytics, CSV export.
           After a GraphQL mutation, the client sends a <Mono>{'{ type: "refresh" }'}</Mono> message to the DO,
@@ -489,7 +484,7 @@ function RealtimeSection() {
           One Durable Object (<Mono>SessionDO</Mono>) per session code. All clients viewing the same session connect to the same
           DO instance. The DO is the real-time coordination layer between D1 (persistent truth) and connected browsers.
         </Prose>
-        <FlowDiagram steps={['Browser (WS)', 'Worker (Router)', 'SessionDO', 'In-Memory State', 'Broadcast']} color="var(--success)" />
+        <FlowDiagram steps={['Browser (WS)', 'Hono Worker', 'SessionDO', 'In-Memory State', 'Broadcast']} color="var(--success)" />
       </DocCard>
 
       <DocCard>
@@ -531,14 +526,12 @@ function RealtimeSection() {
       </DocCard>
 
       <DocCard>
-        <SubTitle>Worker Entry Patching</SubTitle>
+        <SubTitle>Hono Worker Entry</SubTitle>
         <Prose>
-          The <Mono>@opennextjs/cloudflare</Mono> build generates <Mono>.open-next/worker.js</Mono>. A post-build script (<Mono>scripts/patch-worker.js</Mono>) patches it to:
-          (1) export the <Mono>SessionDO</Mono> class (required for the DO binding) and
-          (2) wrap the default fetch handler to intercept <Mono>Upgrade: websocket</Mono> requests and route them to the correct DO instance by session code.
-        </Prose>
-        <Prose>
-          Build pipeline: <Mono>npx @opennextjs/cloudflare build</Mono> → <Mono>node scripts/patch-worker.js</Mono> → <Mono>wrangler deploy</Mono>
+          The Hono worker directly exports the <Mono>SessionDO</Mono> class — no build patch scripts needed.
+          The worker intercepts WebSocket upgrade requests at <Mono>/</Mono> and routes them to the correct DO
+          instance by session code. All other API routes (<Mono>/api/graphql</Mono>, <Mono>/api/export/:sessionId</Mono>)
+          are standard Hono handlers. Non-API requests fall through to static assets (the Vite-built SPA).
         </Prose>
       </DocCard>
 

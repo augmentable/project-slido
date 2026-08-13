@@ -1,39 +1,12 @@
-import { NextResponse } from 'next/server';
-import { getDb, type Db } from '@/db';
+import { getDb } from '@/db';
 import * as s from '@/db/schema';
 import { eq, count, avg } from 'drizzle-orm';
 
-async function getDbInstance(): Promise<Db> {
-  try {
-    const { getCloudflareContext } = await import('@opennextjs/cloudflare');
-    const ctx = await getCloudflareContext();
-    return getDb(ctx.env.DB);
-  } catch {
-    const { default: Database } = await import('better-sqlite3');
-    const { readdirSync } = await import('node:fs');
-    const { join } = await import('node:path');
-    const d1Dir = join(process.cwd(), '.wrangler/state/v3/d1/miniflare-D1DatabaseObject');
-    const files = readdirSync(d1Dir).filter((f: string) => f.endsWith('.sqlite') && f !== 'metadata.sqlite');
-    if (!files.length) throw new Error('No local D1 database found.');
-    const sqliteDb = new Database(join(d1Dir, files[0]));
-    const { drizzle } = await import('drizzle-orm/better-sqlite3');
-    const schemaImport = await import('@/db/schema');
-    return drizzle(sqliteDb, { schema: schemaImport }) as unknown as Db;
-  }
-}
-
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ sessionId: string }> },
-) {
-  const { sessionId } = await params;
+export async function handleExport(sessionId: string, format: string, d1: D1Database): Promise<Response> {
   const sid = Number(sessionId);
-  const url = new URL(request.url);
-  const format = url.searchParams.get('format') || 'summary';
+  const db = getDb(d1);
 
   try {
-    const db = await getDbInstance();
-
     const [qCount] = await db.select({ c: count() }).from(s.questions).where(eq(s.questions.sessionId, sid));
     const [uCount] = await db.select({ c: count() }).from(s.upvotes)
       .innerJoin(s.questions, eq(s.upvotes.questionId, s.questions.id))
@@ -99,13 +72,13 @@ export async function GET(
 
     const csv = rows.map((row) => row.join(',')).join('\n');
 
-    return new NextResponse(csv, {
+    return new Response(csv, {
       headers: {
         'Content-Type': 'text/csv',
         'Content-Disposition': `attachment; filename="session-${sessionId}-${format}.csv"`,
       },
     });
   } catch {
-    return NextResponse.json({ error: 'Failed to generate export' }, { status: 500 });
+    return Response.json({ error: 'Failed to generate export' }, { status: 500 });
   }
 }

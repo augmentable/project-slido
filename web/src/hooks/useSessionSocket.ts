@@ -36,7 +36,7 @@ export function useSessionSocket({ code, maxRetries = DEFAULT_MAX_RETRIES }: Use
     if (unmountedRef.current || !code) return;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${protocol}//${window.location.host}/?code=${encodeURIComponent(code.toUpperCase())}`;
+    const url = `${protocol}//${window.location.host}/ws?code=${encodeURIComponent(code.toUpperCase())}`;
 
     try {
       const ws = new WebSocket(url);
@@ -98,9 +98,13 @@ export function useSessionSocket({ code, maxRetries = DEFAULT_MAX_RETRIES }: Use
     return () => {
       unmountedRef.current = true;
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      if (wsRef.current) {
-        wsRef.current.close(1000, 'Component unmounted');
+      const ws = wsRef.current;
+      if (ws) {
         wsRef.current = null;
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.close(1000, 'Component unmounted');
+        }
+        // CONNECTING sockets are handled by the onopen guard above
       }
     };
   }, [connect]);

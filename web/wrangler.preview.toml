@@ -1,10 +1,12 @@
 name = "slido-clone-preview"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
-main = ".open-next/worker.js"
+main = "src/worker.ts"
 
 [assets]
-directory = ".open-next/assets"
+directory = "dist/client"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
 
 # Same D1 database — both workers share production data
 [[d1_databases]]

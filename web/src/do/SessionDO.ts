@@ -122,7 +122,8 @@ export class SessionDO implements DurableObject {
   }
 
   async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): Promise<void> {
-    ws.close(code, reason);
+    const safeCode = code === 1005 || code === 1006 ? 1000 : code;
+    ws.close(safeCode, reason);
 
     // If last client disconnected, flush pending writes immediately
     if (this.ctx.getWebSockets().length === 0 && this.pendingWrites.length > 0) {

@@ -1,8 +1,7 @@
-'use client';
-
-import { use, useState } from 'react';
+import { useState } from 'react';
 import { gql } from '@apollo/client';
 import { useQuery } from '@apollo/client/react';
+import { useParams } from 'react-router';
 
 const GET_SESSION = gql`
   query GetSession($code: String!) {
@@ -17,14 +16,17 @@ const GET_SESSION = gql`
 
 type View = 'qa' | 'poll' | 'quiz';
 
-export default function PresenterPage({ params }: { params: Promise<{ code: string }> }) {
-  const { code } = use(params);
+export default function PresenterPage() {
+  const { code } = useParams<{ code: string }>();
   const [view, setView] = useState<View>('qa');
 
-  const { data } = useQuery(GET_SESSION, { variables: { code: code.toUpperCase() }, pollInterval: 3000 });
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore
-  const session = data?.session;
+  const { data } = useQuery(GET_SESSION, { variables: { code: code!.toUpperCase() }, pollInterval: 3000 });
+  const session = (data as { session?: Record<string, unknown> })?.session as {
+    title: string; code: string; primaryColor?: string; logoUrl?: string;
+    questions: { id: string; text: string; authorName: string | null; isHighlighted: boolean; isAnswered: boolean; upvoteCount: number }[];
+    polls: { id: string; type: string; question: string; isActive: boolean; responseCount: number; options: { id: string; text: string; position: number; voteCount: number }[] }[];
+    quizzes: { id: string; title: string; isActive: boolean; currentQuestionIndex: number; questions: { id: string; text: string; timeLimit: number; position: number; options: { id: string; text: string; position: number }[] }[] }[];
+  } | undefined;
 
   if (!session) {
     return (
@@ -36,18 +38,17 @@ export default function PresenterPage({ params }: { params: Promise<{ code: stri
 
   const brandColor = session.primaryColor || 'var(--accent)';
   const sortedQuestions = [...(session.questions || [])]
-    .filter((q: { isHighlighted: boolean }) => !q.isHighlighted)
-    .sort((a: { upvoteCount: number }, b: { upvoteCount: number }) => b.upvoteCount - a.upvoteCount);
-  const highlighted = (session.questions || []).filter((q: { isHighlighted: boolean }) => q.isHighlighted);
-  const activePoll = session.polls?.find((p: { isActive: boolean }) => p.isActive);
-  const activeQuiz = session.quizzes?.find((q: { isActive: boolean }) => q.isActive);
+    .filter((q) => !q.isHighlighted)
+    .sort((a, b) => b.upvoteCount - a.upvoteCount);
+  const highlighted = (session.questions || []).filter((q) => q.isHighlighted);
+  const activePoll = session.polls?.find((p) => p.isActive);
+  const activeQuiz = session.quizzes?.find((q) => q.isActive);
 
   return (
     <main className="min-h-screen p-8 flex flex-col" style={{ background: 'var(--bg)', color: 'var(--text-strong)' }}>
       <div className="flex items-center justify-between mb-8 animate-fade-in">
         <div className="flex items-center gap-4">
           {session.logoUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
             <img src={session.logoUrl} alt="" className="h-12 w-12 rounded-lg object-cover" />
           )}
           <div>
@@ -68,7 +69,7 @@ export default function PresenterPage({ params }: { params: Promise<{ code: stri
 
       {view === 'qa' && (
         <div className="flex-1 space-y-4 overflow-auto">
-          {highlighted.map((q: { id: string; text: string; authorName: string | null; upvoteCount: number }) => (
+          {highlighted.map((q) => (
             <div key={q.id} className="border-2 p-6 rounded-2xl animate-slide-up" style={{ borderColor: brandColor, background: 'var(--accent-subtle)' }}>
               <p className="text-2xl font-semibold leading-relaxed">{q.text}</p>
               <div className="flex items-center justify-between mt-3">
@@ -77,7 +78,7 @@ export default function PresenterPage({ params }: { params: Promise<{ code: stri
               </div>
             </div>
           ))}
-          {sortedQuestions.slice(0, 8).map((q: { id: string; text: string; authorName: string | null; upvoteCount: number; isAnswered: boolean }, i: number) => (
+          {sortedQuestions.slice(0, 8).map((q, i) => (
             <div key={q.id} className={`themed-card p-5 flex items-center gap-6 animate-fade-in stagger-${Math.min(i + 1, 6)}`} style={{ fontSize: i === 0 ? '1.25rem' : '1.125rem' }}>
               <div className="flex flex-col items-center min-w-16" style={{ color: brandColor }}>
                 <span className="text-sm">▲</span>
@@ -102,8 +103,8 @@ export default function PresenterPage({ params }: { params: Promise<{ code: stri
               <h2 className="text-3xl font-bold text-center">{activePoll.question}</h2>
               <div className="space-y-4 mt-8">
                 {(() => {
-                  const totalVotes = activePoll.options?.reduce((s: number, o: { voteCount: number }) => s + o.voteCount, 0) || 1;
-                  return [...(activePoll.options || [])].sort((a: {position: number}, b: {position: number}) => a.position - b.position).map((opt: { id: string; text: string; voteCount: number }) => {
+                  const totalVotes = activePoll.options?.reduce((s, o) => s + o.voteCount, 0) || 1;
+                  return [...(activePoll.options || [])].sort((a, b) => a.position - b.position).map((opt) => {
                     const pct = Math.round((opt.voteCount / totalVotes) * 100);
                     return (
                       <div key={opt.id} className="space-y-2">
@@ -134,7 +135,7 @@ export default function PresenterPage({ params }: { params: Promise<{ code: stri
               <p className="font-mono" style={{ color: 'var(--text-faint)' }}>Question {activeQuiz.currentQuestionIndex + 1} of {activeQuiz.questions.length}</p>
               <h2 className="text-4xl font-bold">{activeQuiz.questions[activeQuiz.currentQuestionIndex]?.text}</h2>
               <div className="grid grid-cols-2 gap-4 mt-8">
-                {[...(activeQuiz.questions[activeQuiz.currentQuestionIndex]?.options || [])].sort((a: {position: number}, b: {position: number}) => a.position - b.position).map((opt: { id: string; text: string }, i: number) => {
+                {[...(activeQuiz.questions[activeQuiz.currentQuestionIndex]?.options || [])].sort((a, b) => a.position - b.position).map((opt, i) => {
                   const colors = ['#ef4444', '#3b82f6', '#eab308', '#22c55e'];
                   return <div key={opt.id} className="py-6 px-8 rounded-xl text-xl font-bold text-white" style={{ backgroundColor: colors[i % 4] }}>{opt.text}</div>;
                 })}

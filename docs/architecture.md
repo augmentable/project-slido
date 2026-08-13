@@ -1,6 +1,6 @@
 # Architecture Deep Dive
 
-Real-Time Slido Clone — Next.js + GraphQL Yoga + Durable Objects + Cloudflare D1
+Real-Time Slido Clone — Vite + Hono + GraphQL Yoga + Durable Objects + Cloudflare D1
 
 ---
 
@@ -10,15 +10,16 @@ The app is a real-time audience interaction platform: Q&A with upvoting, live po
 
 | Layer | Technology | Role |
 |-------|-----------|------|
-| Framework | Next.js 16 (App Router) | SSR/CSR, routing, API route handler |
+| Frontend | Vite + React 19 | SPA with client-side routing |
+| Routing | React Router v7 | Declarative client-side routes |
+| Worker | Hono | Cloudflare Worker entry — API routes, WS routing, SPA fallback |
 | Real-time | Durable Objects (SessionDO) | Per-session WebSocket hub with in-memory state |
 | API | GraphQL Yoga | Schema-first GraphQL at `/api/graphql` (host-only ops) |
 | Client | Apollo Client 4 + WebSocket | WS primary, Apollo polling fallback |
 | ORM | Drizzle ORM | Type-safe schema, relational queries, migrations |
 | Database | Cloudflare D1 (SQLite) | Edge-located, zero-config SQL |
 | Auth | JWT (jsonwebtoken) | Stateless 7-day tokens, SHA-256 passwords |
-| Deploy | @opennextjs/cloudflare | Adapts Next.js to Cloudflare Workers |
-| Styling | Tailwind CSS 4 | Utility-first with CSS custom properties |
+| Styling | Tailwind CSS 4 (`@tailwindcss/vite`) | Utility-first with CSS custom properties |
 | Theming | CSS custom properties + React context | 3 switchable themes, persisted to localStorage |
 | Typography | Satoshi + Cabinet Grotesk (Fontshare) | Loaded via Fontshare CDN |
 | Charts | Recharts | Analytics dashboards and poll results |
@@ -108,35 +109,9 @@ users
 
 ## Drizzle ORM & Cloudflare D1
 
-### Why Drizzle + D1
+### DB Context in Hono
 
-Drizzle ORM provides type-safe schema definitions, relational queries (similar to Prisma's `include`), and migration generation — all in a package that runs natively in Cloudflare Workers without Node.js polyfills. D1 is Cloudflare's edge SQLite database, co-located with the Workers that query it.
-
-### Schema Definition Pattern
-
-Every table is defined with `sqliteTable()` from `drizzle-orm/sqlite-core`. Booleans use `integer('col', { mode: 'boolean' })` since SQLite has no native boolean. Relations are declared separately with `relations()` for Drizzle's relational query builder — they don't affect the SQL schema but enable nested `with:` queries.
-
-### Database Client Factory
-
-The DB layer (`src/db/index.ts`) is a minimal wrapper:
-
-```typescript
-import { drizzle } from 'drizzle-orm/d1';
-import * as schema from './schema';
-
-export function getDb(d1: D1Database) {
-  return drizzle(d1, { schema });
-}
-```
-
-### Dual-Mode DB Context
-
-The GraphQL route handler resolves the database at runtime:
-
-- **On Cloudflare:** reads the D1 binding from `getCloudflareContext().env.DB`
-- **In local dev:** falls back to `better-sqlite3` against the `.wrangler/state/` SQLite file
-
-This lets the same codebase run on both platforms without conditional imports at the schema level.
+The Hono worker passes `c.env.DB` (the D1 binding) to the GraphQL handler via `createGraphQLHandler(c.env.DB)`. The Drizzle client is created per-request with `getDb(d1)`. No `better-sqlite3` fallback is needed in the worker — `wrangler dev` provides a local D1 binding natively.
 
 ### Migration Workflow
 
@@ -171,81 +146,8 @@ The app ships three distinct, switchable themes controlled by CSS custom propert
 | `src/lib/themes.ts` | Theme types, list, localStorage get/set helpers |
 | `src/components/ThemeProvider.tsx` | React context provider — reads from localStorage on mount, syncs `data-theme` attribute to `<html>` |
 | `src/components/ThemePicker.tsx` | Swatch-based theme selector rendered in page headers |
-| `src/app/globals.css` | CSS variable definitions per theme, base styles, animations (`fadeIn`, `slideUp`, `pulse-glow`) |
-| `src/app/layout.tsx` | Wraps app in `ThemeProvider`, loads Satoshi + Cabinet Grotesk from Fontshare CDN |
-
-### CSS Variable Categories
-
-All components use `var(--name)` for colors, never raw hex values. The variable set includes:
-
-- **Backgrounds:** `--bg`, `--bg-raised`, `--bg-card`, `--bg-input`
-- **Text:** `--text`, `--text-strong`, `--text-muted`, `--text-faint`
-- **Borders:** `--border`, `--border-subtle`
-- **Accents:** `--accent`, `--accent-hover`, `--accent-subtle`, `--accent-2`, `--accent-2-subtle`
-- **Semantic:** `--success`, `--danger`, `--warning` (each with `-subtle` variant)
-- **Effects:** `--ring`, `--shadow`, `--glow`, `--gradient-hero`, `--gradient-card`
-- **Charts:** `--bar-fill`, `--chart-grid`, `--chart-text`
-
-### Hydration Strategy
-
-To avoid flash-of-wrong-theme, the `<html>` tag is SSR'd with `data-theme="nightowl"` (the default). `ThemeProvider` reads localStorage on mount and suppresses children until mounted, rendering a `<div data-theme="nightowl">` wrapper during SSR to prevent hydration mismatches.
-
----
-
-## GraphQL API Layer
-
-### Architecture
-
-The API is a single Next.js Route Handler at `/api/graphql` that delegates to GraphQL Yoga. Yoga is configured schema-first — the SDL and resolvers are co-located in `route.ts` (~860 lines). The schema exports both GET and POST handlers.
-
-On each request, Yoga's context factory calls `getDbFromContext()` to resolve the Drizzle instance. There is no DataLoader or batching layer — each resolver makes direct Drizzle queries.
-
-### Queries (9)
-
-| Query | Arguments | Returns | Purpose |
-|-------|-----------|---------|---------|
-| `me` | token | User? | Verify JWT, return authenticated user |
-| `checkSession` | code | SessionCheck! | Lightweight exists + passcode check |
-| `session` | code, passcode? | Session? | Full session with nested Q&A, polls, quizzes, surveys |
-| `pendingQuestions` | sessionId | [Question!]! | Unapproved questions for moderation queue |
-| `poll` | pollId | Poll? | Single poll with options and responses |
-| `quiz` | quizId | Quiz? | Quiz with ordered questions and options |
-| `quizLeaderboard` | quizId | [LeaderboardEntry!]! | Aggregated scores grouped by voter |
-| `survey` | surveyId | Survey? | Survey with ordered questions |
-| `sessionAnalytics` | sessionId | SessionAnalytics! | Aggregate counts across all activity |
-
-### Mutations (15 operations)
-
-| Mutation | Purpose |
-|----------|---------|
-| `register` / `login` | Email/password auth, returns JWT + user |
-| `createSession` | New session with optional passcode and owner binding |
-| `updateSessionBranding` | Set primary color and logo URL |
-| `createQuestion` | Post question (auto-approved unless moderated) |
-| `approveQuestion` / `rejectQuestion` | Moderation actions |
-| `highlightQuestion` / `markAsAnswered` | Host curation controls |
-| `replyToQuestion` | Threaded reply from host or participant |
-| `upvoteQuestion` | Idempotent upvote (one per voter_token) |
-| `createPoll` / `activatePoll` / `deactivatePoll` | Poll lifecycle |
-| `submitPollResponse` | MC, rating, word cloud, ranking, or open text |
-| `createQuiz` / `addQuizQuestion` | Quiz authoring with correct answer |
-| `startQuiz` / `nextQuizQuestion` | Host-driven quiz progression |
-| `submitQuizAnswer` | Timed answer with speed-based scoring |
-| `createSurvey` / `addSurveyQuestion` | Multi-question form builder |
-| `submitSurveyResponse` / `closeSurvey` | Batch answer submission, close survey |
-
-### Field Resolvers
-
-| Type | Field | Implementation |
-|------|-------|---------------|
-| Question | upvoteCount | `COUNT(*)` from upvotes per question |
-| Question | replies | Returns eager-loaded array, or falls back to query |
-| Poll | responseCount | `COUNT(*)` from poll_responses per poll |
-| PollOption | voteCount | `COUNT(*)` from poll_responses per option |
-| PollResponse | rankingOrder | `JSON.parse()` of the stored string |
-| Survey | responseCount | `COUNT(*)` from survey_responses per survey |
-
-> **N+1 optimization:** The session query eager-loads upvotes and poll responses in the initial Drizzle `findFirst`, computing `upvoteCount`, `responseCount`, and `voteCount` in-memory. Field resolvers accept pre-computed `_upvoteCount` / `_voteCount` values when present, falling back to individual COUNT queries only when a question or option is fetched outside a session context.
+| `src/globals.css` | CSS variable definitions per theme, base styles, animations (`fadeIn`, `slideUp`, `pulse-glow`) |
+| `index.html` | Sets default `data-theme="nightowl"`, loads Satoshi + Cabinet Grotesk from Fontshare CDN |
 
 ---
 
@@ -256,15 +158,15 @@ The app has two data paths: a **real-time WebSocket path** through Durable Objec
 ### Real-Time Path (WebSocket via Durable Object)
 
 ```
-Browser (WebSocket) → Worker (intercepts upgrade) → SessionDO → In-Memory State → Broadcast
-                                                          ↓ (write-behind)
-                                                         D1
+Browser (WebSocket) → Hono Worker (intercepts upgrade) → SessionDO → In-Memory State → Broadcast
+                                                               ↓ (write-behind)
+                                                              D1
 ```
 
 | Step | Layer | What happens |
 |------|-------|-------------|
 | 1 | React component | Session page opens. `useSessionSocket` hook connects via WebSocket to `wss://host/?code=SLIDODEV`. |
-| 2 | Worker fetch handler | Detects `Upgrade: websocket` header, resolves the DO by `env.SESSION_DO.idFromName(code)`, forwards request. |
+| 2 | Hono worker | Detects `Upgrade: websocket` header, resolves the DO by `env.SESSION_DO.idFromName(code)`, forwards request. |
 | 3 | SessionDO.fetch | Creates WebSocket pair via `new WebSocketPair()`, calls `ctx.acceptWebSocket(server)` (Hibernation API). |
 | 4 | SessionDO | Loads full session state from D1 (first access only — cached thereafter). Sends `{ type: 'state', data: {...} }` to the new client. |
 | 5 | User action | Client sends `{ type: 'upvote', questionId: 42, voterToken: '...' }` over WebSocket. |
@@ -275,7 +177,7 @@ Browser (WebSocket) → Worker (intercepts upgrade) → SessionDO → In-Memory 
 ### GraphQL Path (HTTP — fallback + host operations)
 
 ```
-React UI → Apollo Client → Next.js Route → GraphQL Yoga → Drizzle ORM → D1
+React UI → Apollo Client → Hono Route → GraphQL Yoga → Drizzle ORM → D1
 ```
 
 Used for: auth, session creation/branding, quiz/poll/survey authoring, moderation (approve/reject/highlight/reply), analytics, CSV export. After a GraphQL mutation succeeds, the client sends a `{ type: 'refresh' }` message to the DO, which reloads from D1 and broadcasts to all peers.
@@ -283,19 +185,6 @@ Used for: auth, session creation/branding, quiz/poll/survey authoring, moderatio
 ### Fallback Behavior
 
 The `useSessionSocket` hook attempts WebSocket connection with exponential backoff (1s → 2s → 4s → ... → 30s). After 5 failed retries, it sets `fallbackToPolling = true`, which re-enables Apollo's `pollInterval: 3000`. A green dot indicator next to the room code shows the connection status (green = live WebSocket, grey = polling fallback).
-
-### WebSocket Protocol
-
-| Direction | Message Type | Payload |
-|-----------|-------------|---------|
-| Client → DO | `subscribe` | `{ type: 'subscribe', code: 'SLIDODEV' }` |
-| Client → DO | `upvote` | `{ type: 'upvote', questionId, voterToken }` |
-| Client → DO | `createQuestion` | `{ type: 'createQuestion', text, authorName? }` |
-| Client → DO | `submitPollResponse` | `{ type: 'submitPollResponse', pollId, voterToken, selectedOptionId?, ... }` |
-| Client → DO | `submitQuizAnswer` | `{ type: 'submitQuizAnswer', quizQuestionId, selectedOptionId, voterToken, answeredInMs }` |
-| Client → DO | `refresh` | `{ type: 'refresh' }` — triggers D1 reload + broadcast |
-| DO → All | `state` | `{ type: 'state', data: SessionState }` — full session snapshot |
-| DO → Client | `error` | `{ type: 'error', message, action? }` |
 
 ---
 
@@ -317,61 +206,41 @@ One Durable Object instance per session code. All clients viewing the same sessi
 
 - **Immediate writes for ID-dependent operations:** `createQuestion` and `submitQuizAnswer` write to D1 synchronously because they need auto-increment IDs or `correct_option_id` verification (anti-cheat — correct answers are never sent to clients).
 
-### Worker Entry Patching (`scripts/patch-worker.js`)
+### Hono Worker Entry (`src/worker.ts`)
 
-The `@opennextjs/cloudflare` build generates `.open-next/worker.js` as the Worker entry point. A post-build script patches this file to:
+The Hono worker directly exports the `SessionDO` class — no build patch scripts needed. The worker:
 
-1. Add `export { SessionDO } from "../src/do/SessionDO"` (required for the DO binding).
-2. Wrap the default fetch handler to intercept `Upgrade: websocket` requests and route them to the correct DO instance by session code.
-
-The build pipeline is: `npx @opennextjs/cloudflare build` → `node scripts/patch-worker.js` → `wrangler deploy`.
+1. Intercepts WebSocket upgrade requests at `/` and routes them to the correct DO instance by session code
+2. Mounts the GraphQL handler at `/api/graphql`
+3. Mounts the CSV export handler at `/api/export/:sessionId`
+4. Falls through to static assets (Vite-built SPA in `dist/client/`)
+5. Returns `index.html` for any non-API, non-asset path (SPA fallback for client-side routing)
 
 ### Deployment
 
 Two wrangler configs enable parallel deployment of the stable and preview versions:
 
-| Config | Worker Name | URL | DO Support |
-|--------|------------|-----|-----------|
-| `wrangler.toml` | `slido-clone` | `slido-clone.*.workers.dev` | Yes |
-| `wrangler.preview.toml` | `slido-clone-preview` | `slido-clone-preview.*.workers.dev` | Yes |
+| Config | Worker Name | DO Support |
+|--------|------------|-----------|
+| `wrangler.toml` | `slido-clone` | Yes |
+| `wrangler.preview.toml` | `slido-clone-preview` | Yes |
 
 Both share the same D1 database. Each has its own independent DO namespace. Deploy with `npm run deploy` (production) or `npm run deploy:preview` (preview).
 
-#### Wrangler Configuration
+#### Build Pipeline
 
-Both configs require these settings:
+```
+vite build (SPA → dist/client/) → wrangler deploy (bundles src/worker.ts + serves dist/client/ as assets)
+```
+
+No adapter, no patch scripts. Wrangler bundles the Hono worker directly and serves the Vite build output as static assets.
+
+#### Wrangler Configuration
 
 | Setting | Value | Why |
 |---------|-------|-----|
-| `compatibility_flags` | `["nodejs_compat"]` | Next.js server code uses Node built-ins (`async_hooks`, `crypto`, `fs`, etc.) |
-| `main` | `.open-next/worker.js` | Entry point generated by @opennextjs/cloudflare |
-| `[assets] directory` | `.open-next/assets` | Static files (JS chunks, images, manifests) |
+| `compatibility_flags` | `["nodejs_compat"]` | GraphQL + JWT code uses Node built-ins (`crypto`, `buffer`) |
+| `main` | `src/worker.ts` | Hono entry point — wrangler builds this directly |
+| `[assets] directory` | `dist/client` | Vite build output |
 | `[observability] enabled` | `true` | Worker tracing with 1% head sampling |
 | `[limits] cpu_ms` | `300_000` | CPU time limit for long-running requests |
-
-#### OpenNext Configuration (`open-next.config.ts`)
-
-The `@opennextjs/cloudflare` adapter requires explicit configuration for both the server function and middleware:
-
-| Block | Key Setting | Purpose |
-|-------|------------|---------|
-| `default.override` | `wrapper: 'cloudflare-node'`, `converter: 'edge'` | Server function runtime |
-| `default.override` | `proxyExternalRequest: 'fetch'` | External HTTP via Workers fetch |
-| `default.override` | `incrementalCache/tagCache/queue: 'dummy'` | Disable ISR caching (not using KV) |
-| `edgeExternals` | `['node:crypto']` | Allow `node:crypto` in edge bundles |
-| `middleware` | `external: true`, `wrapper: 'cloudflare-edge'` | Middleware runs in edge runtime |
-
-#### TypeScript Configuration
-
-The project uses `@cloudflare/workers-types` for `D1Database`, `DurableObjectNamespace`, and other Cloudflare globals. `tsconfig.json` specifies `"types": ["@cloudflare/workers-types", "node"]` to make these available alongside Node types. A `worker-configuration.d.ts` file declares the `CloudflareEnv` interface with the `DB: D1Database` binding.
-
-### What Stays on GraphQL
-
-- Auth (`register`, `login`, `me`)
-- Session creation and branding
-- Poll/quiz/survey authoring (`createPoll`, `addQuizQuestion`, `addSurveyQuestion`, etc.)
-- Host moderation (`approveQuestion`, `rejectQuestion`, `highlightQuestion`, `markAsAnswered`, `replyToQuestion`)
-- Host controls (`activatePoll`, `startQuiz`, `nextQuizQuestion`, `closeSurvey`)
-- Analytics and CSV export
-
-After any GraphQL mutation, the client sends `{ type: 'refresh' }` to the DO, which reloads from D1 and broadcasts the updated state to all connected peers.

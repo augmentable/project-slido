@@ -1,8 +1,6 @@
-'use client';
-
-import { useState, use, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { gql } from '@apollo/client';
-import Link from 'next/link';
+import { Link, useParams } from 'react-router';
 import { useMutation, useQuery } from '@apollo/client/react';
 import { PollCreator } from '@/components/polls/PollCreator';
 import { PollCard } from '@/components/polls/PollCard';
@@ -57,12 +55,11 @@ const REPLY_TO_QUESTION = gql`mutation ReplyToQuestion($questionId: String!, $te
 type Tab = 'qa' | 'polls' | 'quiz' | 'surveys';
 type SortMode = 'popular' | 'recent' | 'unanswered';
 
-export default function SessionPage({ params }: { params: Promise<{ code: string }> }) {
-  const { code } = use(params);
+export default function SessionPage() {
+  const { code } = useParams<{ code: string }>();
   const { theme, setTheme } = useTheme();
 
   const [voterToken] = useState(() => {
-    if (typeof window === 'undefined') return '';
     let token = localStorage.getItem('slido_voter_token');
     if (!token) { token = crypto.randomUUID(); localStorage.setItem('slido_voter_token', token); }
     return token;
@@ -76,18 +73,15 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
   const [showCreators, setShowCreators] = useState<Record<string, boolean>>({});
   const [wsPostingQuestion, setWsPostingQuestion] = useState(false);
 
-  // ── WebSocket (primary) ──
-  const { session: wsSession, connected: wsConnected, fallbackToPolling, send: wsSend } = useSessionSocket({ code });
+  const { session: wsSession, connected: wsConnected, fallbackToPolling, send: wsSend } = useSessionSocket({ code: code! });
 
-  // ── Apollo (fallback) — only polls when WS is unavailable ──
   const usePolling = fallbackToPolling || !wsConnected;
   const { data, loading, error, refetch } = useQuery(GET_SESSION_DETAILS, {
-    variables: { code: code.toUpperCase() },
+    variables: { code: code!.toUpperCase() },
     pollInterval: usePolling ? 3000 : 0,
     notifyOnNetworkStatusChange: false,
   });
 
-  // Unified session type that both WS and Apollo data conform to
   type SessionData = {
     id: string | number;
     code: string;
@@ -104,7 +98,6 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
 
   type QType = { id: string | number; text: string; authorName: string | null; isAnswered: boolean; upvoteCount: number; isHighlighted: boolean; createdAt: string; replies: { id: string | number; text: string; authorName: string; createdAt: string }[] };
 
-  // Prefer WebSocket session data; fall back to Apollo
   const gqlSession = (data as { session?: SessionData } | undefined)?.session;
   const session: SessionData | undefined = wsConnected && wsSession ? wsSession as unknown as SessionData : gqlSession;
 
@@ -115,7 +108,6 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
   });
   const pendingQuestions = (pendingData as Record<string, unknown>)?.pendingQuestions as Array<{ id: string; text: string; authorName: string | null }> || [];
 
-  // GraphQL mutations for host-only actions. After success, send 'refresh' to DO so all clients get the update.
   const refreshDO = useCallback(() => { if (wsConnected) wsSend({ type: 'refresh' }); }, [wsConnected, wsSend]);
 
   const [createQuestionGql, { loading: gqlPosting }] = useMutation(CREATE_QUESTION, { onCompleted: () => { setQuestionText(''); refetch(); refreshDO(); } });
@@ -159,7 +151,7 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-6" style={{ background: 'var(--gradient-hero)' }}>
         <p className="text-sm" style={{ color: 'var(--danger)' }}>Session not found or server error.</p>
-        <Link href="/" className="text-sm mt-4 hover:underline" style={{ color: 'var(--accent)' }}>&larr; Back to Home</Link>
+        <Link to="/" className="text-sm mt-4 hover:underline" style={{ color: 'var(--accent)' }}>&larr; Back to Home</Link>
       </main>
     );
   }
@@ -193,13 +185,12 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
         <div className="flex items-start justify-between pb-4 animate-fade-in" style={{ borderBottom: '1px solid var(--border)' }}>
           <div className="space-y-2">
             <div className="flex items-center gap-3 flex-wrap">
-              <Link href="/" className="text-xs font-medium tracking-wider uppercase hover:underline" style={{ color: 'var(--accent)' }}>&larr; Leave</Link>
-              <Link href={`/session/${code}/analytics`} className="text-xs tracking-wider uppercase hover:underline" style={{ color: 'var(--text-muted)' }}>Analytics</Link>
-              <Link href={`/session/${code}/present`} className="text-xs tracking-wider uppercase hover:underline" style={{ color: 'var(--success)' }}>Present</Link>
+              <Link to="/" className="text-xs font-medium tracking-wider uppercase hover:underline" style={{ color: 'var(--accent)' }}>&larr; Leave</Link>
+              <Link to={`/session/${code}/analytics`} className="text-xs tracking-wider uppercase hover:underline" style={{ color: 'var(--text-muted)' }}>Analytics</Link>
+              <Link to={`/session/${code}/present`} className="text-xs tracking-wider uppercase hover:underline" style={{ color: 'var(--success)' }}>Present</Link>
             </div>
             <div className="flex items-center gap-3">
               {session.logoUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
                 <img src={session.logoUrl} alt="" className="h-8 w-8 rounded-lg object-cover" />
               )}
               <div>
@@ -271,7 +262,6 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
               </div>
             )}
 
-            {/* Post Question Form */}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -294,7 +284,6 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
               </div>
             </form>
 
-            {/* Sorting */}
             <div className="flex items-center gap-2">
               <span className="text-xs font-medium" style={{ color: 'var(--text-faint)' }}>Sort:</span>
               {(['popular', 'recent', 'unanswered'] as const).map((mode) => (
@@ -312,7 +301,6 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
               ))}
             </div>
 
-            {/* Highlighted */}
             {highlighted.length > 0 && (
               <div className="space-y-2">
                 <h3 className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1" style={{ color: 'var(--warning)' }}>
@@ -330,7 +318,6 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
               </div>
             )}
 
-            {/* Questions List */}
             <div className="space-y-3">
               <h2 className="text-lg font-bold flex items-center justify-between" style={{ color: 'var(--text)' }}>
                 <span>Questions</span>

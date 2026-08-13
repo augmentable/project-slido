@@ -1,24 +1,17 @@
-'use client';
-
-import { use } from 'react';
 import { gql } from '@apollo/client';
 import { useQuery } from '@apollo/client/react';
-import Link from 'next/link';
+import { Link, useParams } from 'react-router';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const GET_SESSION = gql`query GetSession($code: String!) { session(code: $code) { id title code } }`;
 const GET_ANALYTICS = gql`query GetAnalytics($sessionId: String!) { sessionAnalytics(sessionId: $sessionId) { totalParticipants totalQuestions totalUpvotes totalPolls totalPollResponses totalQuizzes quizAverageScore totalSurveys totalSurveyResponses } }`;
 
-export default function AnalyticsPage({ params }: { params: Promise<{ code: string }> }) {
-  const { code } = use(params);
-  const { data: sessionData } = useQuery(GET_SESSION, { variables: { code: code.toUpperCase() } });
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore
-  const session = sessionData?.session;
+export default function AnalyticsPage() {
+  const { code } = useParams<{ code: string }>();
+  const { data: sessionData } = useQuery(GET_SESSION, { variables: { code: code!.toUpperCase() } });
+  const session = (sessionData as { session?: { id: string; title: string; code: string } })?.session;
   const { data: analyticsData, loading } = useQuery(GET_ANALYTICS, { variables: { sessionId: session?.id || '' }, skip: !session?.id, pollInterval: 5000 });
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore
-  const analytics = analyticsData?.sessionAnalytics;
+  const analytics = (analyticsData as { sessionAnalytics?: Record<string, number> })?.sessionAnalytics;
 
   if (!session || loading || !analytics) {
     return (
@@ -52,7 +45,7 @@ export default function AnalyticsPage({ params }: { params: Promise<{ code: stri
       <div className="max-w-4xl w-full space-y-8">
         <div className="flex items-center justify-between pb-4 animate-fade-in" style={{ borderBottom: '1px solid var(--border)' }}>
           <div>
-            <Link href={`/session/${code}`} className="text-xs font-medium uppercase tracking-wider hover:underline" style={{ color: 'var(--accent)' }}>&larr; Back to Session</Link>
+            <Link to={`/session/${code}`} className="text-xs font-medium uppercase tracking-wider hover:underline" style={{ color: 'var(--accent)' }}>&larr; Back to Session</Link>
             <h1 className="text-2xl font-bold mt-1" style={{ fontFamily: "'Cabinet Grotesk', sans-serif", color: 'var(--text-strong)' }}>{session.title} — Analytics</h1>
           </div>
           <a href={`/api/export/${session.id}`} className="themed-btn-ghost text-sm">Export CSV</a>

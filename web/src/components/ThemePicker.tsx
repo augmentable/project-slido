@@ -1,4 +1,3 @@
-'use client';
 
 import { themes, type ThemeId } from '@/lib/themes';
 

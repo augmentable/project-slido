@@ -1,8 +1,5 @@
-'use client';
-
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { useNavigate, Link } from 'react-router';
 import { gql } from '@apollo/client';
 import { useLazyQuery, useMutation } from '@apollo/client/react';
 import { ThemePicker } from '@/components/ThemePicker';
@@ -57,7 +54,7 @@ interface CheckSessionData { checkSession: { exists: boolean; isPasswordProtecte
 interface GetSessionData { session: { id: string; code: string; title: string; isPasswordProtected: boolean } | null }
 
 export default function HomePage() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
 
   const [joinCode, setJoinCode] = useState('');
@@ -113,9 +110,8 @@ export default function HomePage() {
       setAuthEmail('');
       setAuthPassword('');
       setAuthName('');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Authentication failed');
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Authentication failed');
     }
   };
 
@@ -146,7 +142,7 @@ export default function HomePage() {
 
     const { data } = await getSession({ variables: { code: codeFormatted, passcode: joinPasscode || null } }) as { data?: GetSessionData };
     if (data?.session) {
-      router.push(`/session/${codeFormatted}`);
+      navigate(`/session/${codeFormatted}`);
     } else {
       setErrorMsg(needsPasscode ? 'Incorrect passcode.' : `Session "${codeFormatted}" not found.`);
     }
@@ -160,10 +156,9 @@ export default function HomePage() {
     const authToken = localStorage.getItem('slido_auth_token') || null;
     try {
       await createSession({ variables: { title: newTitle.trim(), code: codeFormatted, isModerated, passcode: newPasscode || null, authToken } });
-      router.push(`/session/${codeFormatted}`);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to create session');
+      navigate(`/session/${codeFormatted}`);
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to create session');
     }
   };
 
@@ -176,7 +171,7 @@ export default function HomePage() {
         <div className="flex items-center justify-between animate-fade-in">
           <div className="flex items-center gap-3">
             <ThemePicker current={theme} onChange={setTheme} />
-            <Link href="/docs" className="text-xs font-medium hover:underline" style={{ color: 'var(--text-muted)' }}>Docs</Link>
+            <Link to="/docs" className="text-xs font-medium hover:underline" style={{ color: 'var(--text-muted)' }}>Docs</Link>
           </div>
           {currentUser ? (
             <div className="flex items-center gap-3">

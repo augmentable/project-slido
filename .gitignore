@@ -11,8 +11,6 @@ Thumbs.db
 # Build output
 /dist
 /build
-/.next
-/out
 
 # Local env files
 .env.local

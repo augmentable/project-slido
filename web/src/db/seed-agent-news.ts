@@ -135,13 +135,14 @@ writeFileSync(sqlFile, lines.join('\n'), 'utf-8');
 console.log(`Generated ${lines.length} SQL statements → ${sqlFile}`);
 
 try {
-  console.log('Executing against remote D1...');
-  execSync(`npx wrangler d1 execute slido-db --remote --file=${sqlFile}`, { stdio: 'inherit' });
+  const target = process.argv.includes('--remote') ? '--remote' : '--local';
+  console.log(`Executing against ${target.replace('--', '')} D1...`);
+  execSync(`npx wrangler d1 execute slido-db ${target} --file=${sqlFile}`, { stdio: 'inherit' });
   console.log('\nSeed complete!');
   console.log('  Session: AGENTNEWS');
   console.log(`  Questions: ${stories.length} (from HN top "agents" stories)`);
   console.log('  Polls: 4 (risks, coding agents, word cloud, trust rating)');
   console.log('  Replies: 5');
 } finally {
-  unlinkSync(sqlFile);
+  if (!process.argv.includes('--keep-sql')) unlinkSync(sqlFile);
 }

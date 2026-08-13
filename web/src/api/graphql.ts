@@ -16,8 +16,6 @@ function hashPassword(pw: string) {
   return crypto.createHash('sha256').update(pw).digest('hex');
 }
 
-// ── Schema ──
-
 const schema = createSchema({
   typeDefs: /* GraphQL */ `
     type User {
@@ -238,7 +236,6 @@ const schema = createSchema({
   `,
   resolvers: {
     Query: {
-      // ── Auth ──
       me: async (_: unknown, { token }: { token: string }, { db }: Ctx) => {
         try {
           const payload = jwt.verify(token, JWT_SECRET) as { userId: number };
@@ -249,7 +246,6 @@ const schema = createSchema({
         }
       },
 
-      // ── Session ──
       checkSession: async (_: unknown, { code }: { code: string }, { db }: Ctx) => {
         const sanitized = code.trim().toUpperCase().slice(0, MAX_CODE_LENGTH);
         if (!CODE_PATTERN.test(sanitized)) return { exists: false, isPasswordProtected: false };
@@ -311,7 +307,6 @@ const schema = createSchema({
         return rows;
       },
 
-      // ── Poll ──
       poll: async (_: unknown, { pollId }: { pollId: string }, { db }: Ctx) => {
         return db.query.polls.findFirst({
           where: eq(s.polls.id, Number(pollId)),
@@ -319,7 +314,6 @@ const schema = createSchema({
         });
       },
 
-      // ── Quiz ──
       quiz: async (_: unknown, { quizId }: { quizId: string }, { db }: Ctx) => {
         return db.query.quizzes.findFirst({
           where: eq(s.quizzes.id, Number(quizId)),
@@ -346,7 +340,6 @@ const schema = createSchema({
         }));
       },
 
-      // ── Survey ──
       survey: async (_: unknown, { surveyId }: { surveyId: string }, { db }: Ctx) => {
         return db.query.surveys.findFirst({
           where: eq(s.surveys.id, Number(surveyId)),
@@ -354,7 +347,6 @@ const schema = createSchema({
         });
       },
 
-      // ── Analytics ──
       sessionAnalytics: async (_: unknown, { sessionId }: { sessionId: string }, { db }: Ctx) => {
         const sid = Number(sessionId);
 
@@ -410,7 +402,6 @@ const schema = createSchema({
     },
 
     Mutation: {
-      // ── Auth ──
       register: async (_: unknown, { email, password, displayName }: { email: string; password: string; displayName: string }, { db }: Ctx) => {
         const trimmedEmail = email.trim().toLowerCase().slice(0, 255);
         const trimmedName = displayName.trim().slice(0, 100);
@@ -437,7 +428,6 @@ const schema = createSchema({
         return { token, user };
       },
 
-      // ── Session ──
       createSession: async (_: unknown, args: { title: string; code: string; isModerated?: boolean; passcode?: string; authToken?: string }, { db }: Ctx) => {
         const trimmedTitle = args.title.trim().slice(0, MAX_TITLE_LENGTH);
         const trimmedCode = args.code.trim().toUpperCase().slice(0, MAX_CODE_LENGTH);
@@ -479,7 +469,6 @@ const schema = createSchema({
         return { ...updated, isPasswordProtected: !!updated.passcodeHash };
       },
 
-      // ── Questions ──
       createQuestion: async (_: unknown, args: { sessionId: string; text: string; authorName?: string }, { db }: Ctx) => {
         const trimmedText = args.text.trim().slice(0, MAX_QUESTION_LENGTH);
         if (!trimmedText) throw new Error('Question text is required');
@@ -550,7 +539,6 @@ const schema = createSchema({
         return { ...question, upvoteCount: 0, replies: [] };
       },
 
-      // ── Polls ──
       createPoll: async (_: unknown, args: { sessionId: string; type: string; question: string; options?: string[]; allowMultiple?: boolean }, { db }: Ctx) => {
         const [session] = await db.select().from(s.sessions).where(eq(s.sessions.id, Number(args.sessionId)));
         if (!session) throw new Error('Session not found');
@@ -606,7 +594,6 @@ const schema = createSchema({
         return true;
       },
 
-      // ── Quiz ──
       createQuiz: async (_: unknown, args: { sessionId: string; title: string }, { db }: Ctx) => {
         const [session] = await db.select().from(s.sessions).where(eq(s.sessions.id, Number(args.sessionId)));
         if (!session) throw new Error('Session not found');
@@ -695,7 +682,6 @@ const schema = createSchema({
         return answer;
       },
 
-      // ── Survey ──
       createSurvey: async (_: unknown, args: { sessionId: string; title: string }, { db }: Ctx) => {
         const [session] = await db.select().from(s.sessions).where(eq(s.sessions.id, Number(args.sessionId)));
         if (!session) throw new Error('Session not found');
@@ -768,7 +754,6 @@ const schema = createSchema({
       },
     },
 
-    // ── Field Resolvers ──
     Question: {
       upvoteCount: async (parent: { id: number; _upvoteCount?: number }, _: unknown, { db }: Ctx) => {
         if (parent._upvoteCount !== undefined) return parent._upvoteCount;
@@ -813,8 +798,6 @@ const schema = createSchema({
   },
 });
 
-// ── Helpers ──
-
 type Ctx = { db: Db };
 
 async function loadPoll(db: Db, pollId: number) {
@@ -831,50 +814,12 @@ async function loadQuiz(db: Db, quizId: number) {
   });
 }
 
-// ── DB Context ──
-
-let _localDb: Db | null = null;
-
-async function getDbFromContext(): Promise<Db> {
-  try {
-    const { getCloudflareContext } = await import('@opennextjs/cloudflare');
-    const ctx = await getCloudflareContext();
-    return getDb(ctx.env.DB);
-  } catch {
-    if (!_localDb) {
-      const { default: Database } = await import('better-sqlite3');
-      const { readdirSync } = await import('node:fs');
-      const { join } = await import('node:path');
-      const d1Dir = join(process.cwd(), '.wrangler/state/v3/d1/miniflare-D1DatabaseObject');
-      const files = readdirSync(d1Dir).filter((f: string) => f.endsWith('.sqlite') && f !== 'metadata.sqlite');
-      if (!files.length) throw new Error('No local D1 database found. Run `npm run db:migrate` first.');
-      const sqliteDb = new Database(join(d1Dir, files[0]));
-      sqliteDb.pragma('journal_mode = WAL');
-      sqliteDb.pragma('foreign_keys = ON');
-      const { drizzle } = await import('drizzle-orm/better-sqlite3');
-      const schemaImport = await import('@/db/schema');
-      _localDb = drizzle(sqliteDb, { schema: schemaImport }) as unknown as Db;
-    }
-    return _localDb;
-  }
-}
-
-// ── Yoga Handler ──
-
-const yoga = createYoga({
-  schema,
-  graphqlEndpoint: '/api/graphql',
-  fetchAPI: { Response },
-  context: async () => {
-    const db = await getDbFromContext();
-    return { db };
-  },
-});
-
-export async function GET(request: Request) {
-  return yoga.handle(request);
-}
-
-export async function POST(request: Request) {
-  return yoga.handle(request);
+export function createGraphQLHandler(db: D1Database) {
+  const drizzleDb = getDb(db);
+  return createYoga({
+    schema,
+    graphqlEndpoint: '/api/graphql',
+    fetchAPI: { Response },
+    context: () => ({ db: drizzleDb }),
+  });
 }
