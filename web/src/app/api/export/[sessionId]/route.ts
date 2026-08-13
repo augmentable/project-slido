@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDb, type Db } from '@/db';
 import * as s from '@/db/schema';
-import { eq, count, avg } from 'drizzle-orm';
+import { eq, and, count, avg } from 'drizzle-orm';
 
 async function getDbInstance(): Promise<Db> {
   try {
@@ -37,7 +37,7 @@ export async function GET(
     const [qCount] = await db.select({ c: count() }).from(s.questions).where(eq(s.questions.sessionId, sid));
     const [uCount] = await db.select({ c: count() }).from(s.upvotes)
       .innerJoin(s.questions, eq(s.upvotes.questionId, s.questions.id))
-      .where(eq(s.questions.sessionId, sid));
+      .where(and(eq(s.questions.sessionId, sid), eq(s.upvotes.value, 1)));
     const [pCount] = await db.select({ c: count() }).from(s.polls).where(eq(s.polls.sessionId, sid));
     const [prCount] = await db.select({ c: count() }).from(s.pollResponses)
       .innerJoin(s.polls, eq(s.pollResponses.pollId, s.polls.id))
@@ -66,7 +66,7 @@ export async function GET(
 
     if (format === 'full') {
       rows.push([], ['--- QUESTIONS ---']);
-      rows.push(['ID', 'Text', 'Author', 'Upvotes', 'Answered']);
+      rows.push(['ID', 'Title', 'Text', 'Author', 'Upvotes', 'Downvotes', 'Score', 'Answered']);
 
       const questionsList = await db.query.questions.findMany({
         where: eq(s.questions.sessionId, sid),
@@ -74,11 +74,16 @@ export async function GET(
       });
 
       for (const q of questionsList) {
+        const upvoteCount = q.upvotes.filter((vote) => vote.value === 1).length;
+        const downvoteCount = q.upvotes.filter((vote) => vote.value === -1).length;
         rows.push([
           String(q.id),
+          `"${q.title}"`,
           `"${q.text}"`,
           q.authorName || 'Anonymous',
-          String(q.upvotes.length),
+          String(upvoteCount),
+          String(downvoteCount),
+          String(upvoteCount - downvoteCount),
           q.isAnswered ? 'Yes' : 'No',
         ]);
       }
