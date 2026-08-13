@@ -59,16 +59,16 @@ export default function PresenterPage({ params }: { params: Promise<{ code: stri
   if (quizzesEnabled) viewTabs.push('quiz');
 
   return (
-    <main className="h-screen overflow-hidden flex" style={{ background: 'var(--bg)', color: 'var(--text-strong)' }}>
+    <main className="min-h-dvh lg:h-screen overflow-x-hidden lg:overflow-hidden flex flex-col lg:flex-row" style={{ background: 'var(--bg)', color: 'var(--text-strong)' }}>
       <aside
-        className="sticky top-0 h-screen shrink-0 flex items-center justify-center p-8"
-        style={{ borderRight: '1px solid var(--border)', width: qrCollapsed ? 240 : 480, paddingLeft: 64 }}
+        className={`shrink-0 flex items-center justify-center w-full py-4 px-4 border-b lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r lg:py-8 lg:pr-8 lg:pl-16 ${qrCollapsed ? 'lg:w-[240px]' : 'lg:w-[480px]'}`}
+        style={{ borderColor: 'var(--border)' }}
       >
         <RoomCode code={session.code} size="xl" layout="stack" collapsible onCollapsedChange={setQrCollapsed} />
       </aside>
-      <section className="min-w-0 flex-1 h-full overflow-y-auto p-[32px]">
+      <section className="min-w-0 flex-1 h-full overflow-y-auto p-4 md:p-8">
         <SaturdayBanner code={session.code} enabled={session.saturdayBannerEnabled ?? true} />
-        <div className="flex items-center gap-4 mb-8 animate-fade-in">
+        <div className="flex flex-wrap items-center gap-3 lg:gap-4 mb-6 lg:mb-8 animate-fade-in">
           <div className="flex items-center gap-4 min-w-0">
             {session.logoUrl && (
               // eslint-disable-next-line @next/next/no-img-element
@@ -78,7 +78,7 @@ export default function PresenterPage({ params }: { params: Promise<{ code: stri
               <div className="flex items-center gap-3 mb-1">
                 <Link href={`/session/${code}`} className="text-xs font-medium tracking-wider uppercase hover:underline" style={{ color: 'var(--accent)' }}>&larr; Session</Link>
               </div>
-              <h1 className="text-4xl font-bold" style={{ fontFamily: "'Cabinet Grotesk', sans-serif", color: brandColor }}>{session.title}</h1>
+              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold" style={{ fontFamily: "'Cabinet Grotesk', sans-serif", color: brandColor }}>{session.title}</h1>
             </div>
           </div>
           {viewTabs.length > 1 && (
@@ -101,7 +101,7 @@ export default function PresenterPage({ params }: { params: Promise<{ code: stri
         <div className="flex-1 space-y-4 overflow-auto">
           {highlighted.map((q: { id: string; title: string; text: string; authorName: string | null; upvoteCount: number; downvoteCount: number; score?: number }) => (
             <div key={q.id} className="border-2 p-6 rounded-2xl animate-slide-up" style={{ borderColor: brandColor, background: 'var(--accent-subtle)' }}>
-              <p className="text-5xl font-semibold leading-relaxed">{q.title}</p>
+              <p className="text-2xl sm:text-4xl lg:text-5xl font-semibold leading-relaxed">{q.title}</p>
               {q.text.trim() && <LinkifiedText text={q.text} className="text-xl leading-relaxed mt-3" style={{ color: 'var(--text-muted)' }} />}
               <div className="flex items-center justify-between mt-3">
                 <span className="text-lg" style={{ color: 'var(--text-muted)' }}>{q.authorName || 'Anonymous'}</span>
@@ -110,12 +110,12 @@ export default function PresenterPage({ params }: { params: Promise<{ code: stri
             </div>
           ))}
           {sortedQuestions.slice(0, 8).map((q: { id: string; title: string; text: string; authorName: string | null; upvoteCount: number; downvoteCount: number; score?: number; isAnswered: boolean }, i: number) => (
-            <div key={q.id} className={`themed-card p-5 flex items-center gap-6 animate-fade-in stagger-${Math.min(i + 1, 6)}`} style={{ fontSize: i === 0 ? '1.25rem' : '1.125rem' }}>
+            <div key={q.id} className={`themed-card p-5 flex items-start sm:items-center gap-4 sm:gap-6 animate-fade-in stagger-${Math.min(i + 1, 6)}`} style={{ fontSize: i === 0 ? '1.25rem' : '1.125rem' }}>
               <div className="flex items-center justify-end min-w-20 font-mono" style={{ color: brandColor }}>
                 <span className="text-3xl font-bold leading-none">{q.upvoteCount - q.downvoteCount}</span>
               </div>
               <div className="flex-1">
-                <p className="text-3xl font-semibold leading-relaxed">{q.title}</p>
+                <p className="text-xl sm:text-2xl lg:text-3xl font-semibold leading-relaxed">{q.title}</p>
                 {q.text.trim() && <LinkifiedText text={q.text} className="text-lg leading-relaxed mt-1" style={{ color: 'var(--text-muted)' }} />}
                 <span className="text-base mt-1 block" style={{ color: 'var(--text-faint)' }}>
                   {q.authorName || 'Anonymous'}
@@ -164,8 +164,8 @@ export default function PresenterPage({ params }: { params: Promise<{ code: stri
           {activeQuiz && activeQuiz.currentQuestionIndex >= 0 ? (
             <div className="w-full max-w-3xl text-center space-y-8 animate-slide-up">
               <p className="font-mono" style={{ color: 'var(--text-faint)' }}>Question {activeQuiz.currentQuestionIndex + 1} of {activeQuiz.questions.length}</p>
-              <h2 className="text-4xl font-bold">{activeQuiz.questions[activeQuiz.currentQuestionIndex]?.text}</h2>
-              <div className="grid grid-cols-2 gap-4 mt-8">
+              <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold">{activeQuiz.questions[activeQuiz.currentQuestionIndex]?.text}</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-8">
                 {[...(activeQuiz.questions[activeQuiz.currentQuestionIndex]?.options || [])].sort((a: {position: number}, b: {position: number}) => a.position - b.position).map((opt: { id: string; text: string }, i: number) => {
                   const colors = ['#ef4444', '#3b82f6', '#eab308', '#22c55e'];
                   return <div key={opt.id} className="py-6 px-8 rounded-xl text-xl font-bold text-white" style={{ backgroundColor: colors[i % 4] }}>{opt.text}</div>;

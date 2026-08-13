@@ -164,13 +164,13 @@ export default function HomePage() {
   };
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-dots-pattern relative">
+    <main className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 bg-dots-pattern relative overflow-x-hidden">
       <div className="absolute inset-0" style={{ background: 'var(--gradient-hero)' }} />
       <div className="relative z-10 max-w-md w-full space-y-8">
 
         {/* Hero */}
         <div className="text-center space-y-3 animate-slide-up">
-          <h1 className="text-5xl font-black tracking-tight" style={{ fontFamily: "'Cabinet Grotesk', sans-serif", color: 'var(--text-strong)' }}>
+          <h1 className="text-4xl sm:text-5xl font-black tracking-tight" style={{ fontFamily: "'Cabinet Grotesk', sans-serif", color: 'var(--text-strong)' }}>
             Live<span style={{ color: 'var(--accent)' }}>Topics</span>
           </h1>
           <p className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
@@ -220,7 +220,7 @@ export default function HomePage() {
           {/* Join */}
           <form onSubmit={handleJoin} className="space-y-3">
             <h2 className="text-lg font-bold" style={{ color: 'var(--text-strong)' }}>Join a Session</h2>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <input
                 type="text"
                 placeholder="Enter code e.g. AGENTNEWS"

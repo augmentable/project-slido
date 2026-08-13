@@ -180,7 +180,7 @@ export default function SettingsPage({ params }: { params: Promise<{ code: strin
   return (
     <main className="min-h-screen p-4 md:p-8 flex justify-center" style={{ background: 'var(--gradient-hero)' }}>
       <div className="max-w-4xl w-full space-y-8">
-        <div className="flex items-center justify-between pb-4 animate-fade-in" style={{ borderBottom: '1px solid var(--border)' }}>
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-4 animate-fade-in" style={{ borderBottom: '1px solid var(--border)' }}>
           <div>
             <div className="flex items-center gap-3 text-xs font-medium uppercase tracking-wider">
               <Link href={`/session/${code}`} className="hover:underline" style={{ color: 'var(--accent)' }}>&larr; Back to Session</Link>
@@ -193,7 +193,7 @@ export default function SettingsPage({ params }: { params: Promise<{ code: strin
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {cards.map((card, i) => (
             <div key={card.label} className={`themed-card p-4 text-center animate-slide-up stagger-${Math.min(i + 1, 6)}`}>
               <p className="text-2xl font-bold font-mono" style={{ color: 'var(--accent)', animation: 'count-up 0.5s ease-out both', animationDelay: `${i * 0.06}s` }}>{card.value}</p>
@@ -241,7 +241,7 @@ export default function SettingsPage({ params }: { params: Promise<{ code: strin
           {!adminToken ? (
             <div className="space-y-3">
               <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Enter the admin password to manage the OpenRouter API key.</p>
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <input
                   type="password"
                   value={adminPassword}
@@ -262,7 +262,7 @@ export default function SettingsPage({ params }: { params: Promise<{ code: strin
               {adminQueryError && !isAdminAuthError(adminQueryError) && (
                 <p className="text-xs" style={{ color: 'var(--danger)' }}>{serverErrorMessage(adminQueryError)}</p>
               )}
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <input
                   type="password"
                   value={adminKeyInput}

@@ -31,7 +31,7 @@ export function RoomCode({ code, size = 'md', live, layout = 'row', collapsible 
   // Collapsed stacked rail is 200px with padding; text-5xl + tracking overflows both edges.
   const codeTextSize = !showQr && stacked
     ? 'text-2xl'
-    : size === 'xl' && stacked ? 'text-5xl' : size === 'xl' ? 'text-7xl' : 'text-3xl';
+    : size === 'xl' && stacked ? 'text-3xl lg:text-5xl' : size === 'xl' ? 'text-5xl lg:text-7xl' : 'text-3xl';
   const codeTracking = !showQr && stacked ? 'tracking-[0.04em]' : 'tracking-[0.12em]';
 
   useEffect(() => {
@@ -78,8 +78,8 @@ export function RoomCode({ code, size = 'md', live, layout = 'row', collapsible 
             aria-expanded={showQr}
             aria-label={showQr ? 'Hide QR code' : 'Show QR code'}
             title={showQr ? 'Hide QR code' : 'Show QR code'}
-            className="mt-2 rounded-lg text-xs font-medium transition-colors"
-            style={{ background: 'var(--bg-raised)', color: 'var(--text-muted)', border: '1px solid var(--border)', padding: '4px 10px' }}
+            className="mt-2 min-h-11 lg:min-h-0 rounded-lg text-xs font-medium transition-colors"
+            style={{ background: 'var(--bg-raised)', color: 'var(--text-muted)', border: '1px solid var(--border)', padding: '8px 14px' }}
           >
             {showQr ? 'Hide QR' : 'Show QR'}
           </button>
@@ -94,7 +94,10 @@ export function RoomCode({ code, size = 'md', live, layout = 'row', collapsible 
           aria-hidden={showQr ? undefined : true}
           style={showQr ? undefined : { visibility: 'hidden' }}
         >
-          <div className="bg-white" style={{ width: qrSize, height: qrSize }}>
+          <div
+            className={`bg-white ${size === 'xl' && stacked ? 'h-[180px] w-[180px] lg:h-[360px] lg:w-[360px]' : ''}`}
+            style={size === 'xl' && stacked ? undefined : { width: qrSize, height: qrSize }}
+          >
             {showQr && qrDataUrl ? <img src={qrDataUrl} alt={`QR code for room ${code}`} width={qrSize} height={qrSize} className="block h-full w-full" /> : <div className="h-full w-full" aria-hidden="true" />}
           </div>
         </div>

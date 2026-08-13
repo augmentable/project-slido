@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { ApolloWrapper } from '../components/ApolloWrapper';
 import { ThemeProvider } from '../components/ThemeProvider';
@@ -6,6 +6,11 @@ import { ThemeProvider } from '../components/ThemeProvider';
 export const metadata: Metadata = {
   title: 'Slido Clone — Live Q&A & Polls',
   description: 'Real-time audience interaction with Q&A, polls, quizzes & surveys',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
 };
 
 export default function RootLayout({

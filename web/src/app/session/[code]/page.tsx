@@ -287,10 +287,10 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
   const hasEnoughQuestionText = questionText.replace(/\s/g, '').length >= 12;
 
   return (
-    <main className="min-h-screen flex" style={{ background: 'var(--gradient-hero)' }}>
+    <main className="min-h-screen flex flex-col lg:flex-row" style={{ background: 'var(--gradient-hero)' }}>
       <aside
-        className="sticky top-0 h-screen shrink-0 flex items-center justify-center p-8"
-        style={{ borderRight: '1px solid var(--border)', width: qrCollapsed ? 240 : 480, paddingLeft: 64 }}
+        className={`shrink-0 flex items-center justify-center w-full py-4 px-4 border-b lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r lg:py-8 lg:pr-8 lg:pl-16 ${qrCollapsed ? 'lg:w-[240px]' : 'lg:w-[480px]'}`}
+        style={{ borderColor: 'var(--border)' }}
       >
         <RoomCode code={session.code} size="xl" layout="stack" collapsible live={wsConnected} onCollapsedChange={setQrCollapsed} />
       </aside>
@@ -357,7 +357,7 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
               <div className="space-y-2 p-3 rounded-xl animate-fade-in" style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)' }}>
                 <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--warning)' }}>Pending Approval</h3>
                 {pendingQuestions.map((q) => (
-                  <div key={q.id} className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--bg-card)' }}>
+                  <div key={q.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 rounded-lg" style={{ background: 'var(--bg-card)' }}>
                     <div>
                       <p className="text-sm font-semibold" style={{ color: 'var(--text)' }}>{q.title}</p>
                       {q.text.trim() && <LinkifiedText text={q.text} className="text-xs mt-1" style={{ color: 'var(--text-muted)' }} />}
@@ -389,7 +389,7 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
                 onChange={(e) => setQuestionText(e.target.value)}
                 className="themed-input w-full resize-none"
               />
-              <div className="flex items-center gap-3">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                 <input type="text" placeholder="Your name (optional)" value={authorName} onChange={(e) => {
                   const nextName = e.target.value;
                   setAuthorName(nextName);
