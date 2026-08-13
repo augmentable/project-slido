@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, use } from 'react';
+import { useState, use, useCallback } from 'react';
 import { gql } from '@apollo/client';
 import Link from 'next/link';
 import { useMutation, useQuery } from '@apollo/client/react';
@@ -12,6 +12,7 @@ import { SurveyCreator } from '@/components/survey/SurveyCreator';
 import { SurveyCard } from '@/components/survey/SurveyCard';
 import { ThemePicker } from '@/components/ThemePicker';
 import { useTheme } from '@/components/ThemeProvider';
+import { useSessionSocket } from '@/hooks/useSessionSocket';
 
 const GET_SESSION_DETAILS = gql`
   query GetSessionDetails($code: String!) {
@@ -73,33 +74,80 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
   const [authorName, setAuthorName] = useState('');
   const [showModeration, setShowModeration] = useState(false);
   const [showCreators, setShowCreators] = useState<Record<string, boolean>>({});
+  const [wsPostingQuestion, setWsPostingQuestion] = useState(false);
 
+  // ── WebSocket (primary) ──
+  const { session: wsSession, connected: wsConnected, fallbackToPolling, send: wsSend } = useSessionSocket({ code });
+
+  // ── Apollo (fallback) — only polls when WS is unavailable ──
+  const usePolling = fallbackToPolling || !wsConnected;
   const { data, loading, error, refetch } = useQuery(GET_SESSION_DETAILS, {
     variables: { code: code.toUpperCase() },
-    pollInterval: 3000,
+    pollInterval: usePolling ? 3000 : 0,
     notifyOnNetworkStatusChange: false,
   });
 
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore
-  const session = data?.session;
+  // Unified session type that both WS and Apollo data conform to
+  type SessionData = {
+    id: string | number;
+    code: string;
+    title: string;
+    isModerated: boolean;
+    primaryColor?: string | null;
+    logoUrl?: string | null;
+    owner?: { id: string | number; displayName: string } | null;
+    questions: QType[];
+    polls: { id: string | number; type: string; question: string; isActive: boolean; options: { id: string | number; text: string; position: number; voteCount: number }[] }[];
+    quizzes: { id: string | number; title: string; isActive: boolean; currentQuestionIndex: number; questions: { id: string | number; text: string; timeLimit: number; position: number; options: { id: string | number; text: string; position: number }[] }[] }[];
+    surveys: { id: string | number; title: string; isOpen: boolean; questions: { id: string | number; type: string; text: string; position: number; isRequired: boolean; options: { id: string | number; text: string; position: number }[] }[] }[];
+  };
+
+  type QType = { id: string | number; text: string; authorName: string | null; isAnswered: boolean; upvoteCount: number; isHighlighted: boolean; createdAt: string; replies: { id: string | number; text: string; authorName: string; createdAt: string }[] };
+
+  // Prefer WebSocket session data; fall back to Apollo
+  const gqlSession = (data as { session?: SessionData } | undefined)?.session;
+  const session: SessionData | undefined = wsConnected && wsSession ? wsSession as unknown as SessionData : gqlSession;
 
   const { data: pendingData, refetch: refetchPending } = useQuery(GET_PENDING_QUESTIONS, {
-    variables: { sessionId: session?.id || '' },
+    variables: { sessionId: session?.id ? String(session.id) : '' },
     skip: !session?.id || !session?.isModerated,
-    pollInterval: 5000,
+    pollInterval: session?.isModerated ? 5000 : 0,
   });
-  const pendingQuestions = (pendingData as any)?.pendingQuestions || [];
+  const pendingQuestions = (pendingData as Record<string, unknown>)?.pendingQuestions as Array<{ id: string; text: string; authorName: string | null }> || [];
 
-  const [createQuestion, { loading: posting }] = useMutation(CREATE_QUESTION, { onCompleted: () => { setQuestionText(''); refetch(); } });
-  const [upvoteQuestion] = useMutation(UPVOTE_QUESTION, { onCompleted: () => refetch() });
-  const [approveQuestion] = useMutation(APPROVE_QUESTION, { onCompleted: () => { refetch(); refetchPending(); } });
-  const [rejectQuestion] = useMutation(REJECT_QUESTION, { onCompleted: () => { refetch(); refetchPending(); } });
-  const [highlightQuestion] = useMutation(HIGHLIGHT_QUESTION, { onCompleted: () => refetch() });
-  const [markAnswered] = useMutation(MARK_ANSWERED, { onCompleted: () => refetch() });
-  const [replyToQuestion] = useMutation(REPLY_TO_QUESTION, { onCompleted: () => refetch() });
+  // GraphQL mutations for host-only actions. After success, send 'refresh' to DO so all clients get the update.
+  const refreshDO = useCallback(() => { if (wsConnected) wsSend({ type: 'refresh' }); }, [wsConnected, wsSend]);
 
-  if (loading && !data) {
+  const [createQuestionGql, { loading: gqlPosting }] = useMutation(CREATE_QUESTION, { onCompleted: () => { setQuestionText(''); refetch(); refreshDO(); } });
+  const [upvoteQuestionGql] = useMutation(UPVOTE_QUESTION, { onCompleted: () => { refetch(); refreshDO(); } });
+  const [approveQuestion] = useMutation(APPROVE_QUESTION, { onCompleted: () => { refetch(); refetchPending(); refreshDO(); } });
+  const [rejectQuestion] = useMutation(REJECT_QUESTION, { onCompleted: () => { refetch(); refetchPending(); refreshDO(); } });
+  const [highlightQuestion] = useMutation(HIGHLIGHT_QUESTION, { onCompleted: () => { refetch(); refreshDO(); } });
+  const [markAnswered] = useMutation(MARK_ANSWERED, { onCompleted: () => { refetch(); refreshDO(); } });
+  const [replyToQuestion] = useMutation(REPLY_TO_QUESTION, { onCompleted: () => { refetch(); refreshDO(); } });
+
+  const posting = wsPostingQuestion || gqlPosting;
+
+  const handleUpvote = useCallback((questionId: string | number) => {
+    if (wsConnected) {
+      wsSend({ type: 'upvote', questionId: Number(questionId), voterToken });
+    } else {
+      upvoteQuestionGql({ variables: { questionId: String(questionId), voterToken } });
+    }
+  }, [wsConnected, wsSend, voterToken, upvoteQuestionGql]);
+
+  const handleCreateQuestion = useCallback(() => {
+    if (!questionText.trim() || !session?.id) return;
+    if (wsConnected) {
+      wsSend({ type: 'createQuestion', text: questionText.trim(), authorName: authorName.trim() || undefined });
+      setQuestionText('');
+      setWsPostingQuestion(false);
+    } else {
+      createQuestionGql({ variables: { sessionId: String(session.id), text: questionText.trim(), authorName: authorName.trim() || null } });
+    }
+  }, [questionText, authorName, session?.id, wsConnected, wsSend, createQuestionGql]);
+
+  if (loading && !data && !wsSession) {
     return (
       <main className="min-h-screen flex items-center justify-center" style={{ background: 'var(--gradient-hero)' }}>
         <div className="animate-pulse-glow w-3 h-3 rounded-full" style={{ background: 'var(--accent)' }} />
@@ -107,7 +155,7 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
     );
   }
 
-  if (error || !session) {
+  if ((error && !wsSession) || !session) {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center p-6" style={{ background: 'var(--gradient-hero)' }}>
         <p className="text-sm" style={{ color: 'var(--danger)' }}>Session not found or server error.</p>
@@ -116,9 +164,7 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
     );
   }
 
-  const highlighted = [...(session.questions || [])].filter((q: { isHighlighted: boolean }) => q.isHighlighted);
-
-  type QType = { id: string; text: string; authorName: string | null; isAnswered: boolean; upvoteCount: number; isHighlighted: boolean; createdAt: string; replies: { id: string; text: string; authorName: string; createdAt: string }[] };
+  const highlighted = [...(session.questions || [])].filter((q) => q.isHighlighted);
 
   const sortedQuestions = [...(session.questions || [])]
     .filter((q: QType) => !q.isHighlighted)
@@ -166,7 +212,14 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
             <ThemePicker current={theme} onChange={setTheme} />
             <div className="themed-card px-3 py-1.5 text-right" style={{ borderRadius: '10px' }}>
               <span className="text-[10px] block font-medium tracking-wider uppercase" style={{ color: 'var(--text-faint)' }}>Room Code</span>
-              <span className="text-sm font-bold font-mono" style={{ color: 'var(--accent)' }}>{session.code}</span>
+              <div className="flex items-center gap-1.5 justify-end">
+                <span className="text-sm font-bold font-mono" style={{ color: 'var(--accent)' }}>{session.code}</span>
+                <span
+                  className="w-1.5 h-1.5 rounded-full"
+                  style={{ background: wsConnected ? 'var(--success)' : 'var(--text-faint)' }}
+                  title={wsConnected ? 'Live (WebSocket)' : 'Polling'}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -203,15 +256,15 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
             {showModeration && pendingQuestions.length > 0 && (
               <div className="space-y-2 p-3 rounded-xl animate-fade-in" style={{ background: 'var(--warning-subtle)', border: '1px solid var(--warning)' }}>
                 <h3 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--warning)' }}>Pending Approval</h3>
-                {pendingQuestions.map((q: { id: string; text: string; authorName: string | null }) => (
+                {pendingQuestions.map((q) => (
                   <div key={q.id} className="flex items-center justify-between p-3 rounded-lg" style={{ background: 'var(--bg-card)' }}>
                     <div>
                       <p className="text-sm" style={{ color: 'var(--text)' }}>{q.text}</p>
                       <p className="text-[10px]" style={{ color: 'var(--text-faint)' }}>{q.authorName || 'Anonymous'}</p>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => approveQuestion({ variables: { questionId: q.id } })} className="text-xs px-2 py-1 rounded" style={{ color: 'var(--success)', background: 'var(--success-subtle)' }}>Approve</button>
-                      <button onClick={() => rejectQuestion({ variables: { questionId: q.id } })} className="text-xs px-2 py-1 rounded" style={{ color: 'var(--danger)', background: 'var(--danger-subtle)' }}>Reject</button>
+                      <button onClick={() => approveQuestion({ variables: { questionId: String(q.id) } })} className="text-xs px-2 py-1 rounded" style={{ color: 'var(--success)', background: 'var(--success-subtle)' }}>Approve</button>
+                      <button onClick={() => rejectQuestion({ variables: { questionId: String(q.id) } })} className="text-xs px-2 py-1 rounded" style={{ color: 'var(--danger)', background: 'var(--danger-subtle)' }}>Reject</button>
                     </div>
                   </div>
                 ))}
@@ -222,8 +275,7 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                if (!questionText.trim() || !session?.id) return;
-                createQuestion({ variables: { sessionId: session.id, text: questionText.trim(), authorName: authorName.trim() || null } });
+                handleCreateQuestion();
               }}
               className="themed-card p-4 space-y-3 animate-slide-up stagger-2"
             >
@@ -268,10 +320,10 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
                 </h3>
                 {highlighted.map((q: QType) => (
                   <QuestionItem key={q.id} q={q}
-                    onUpvote={() => upvoteQuestion({ variables: { questionId: q.id, voterToken } })}
-                    onHighlight={() => highlightQuestion({ variables: { questionId: q.id, highlighted: !q.isHighlighted } })}
-                    onMarkAnswered={() => markAnswered({ variables: { questionId: q.id, answered: !q.isAnswered } })}
-                    onReply={(text: string, name: string) => replyToQuestion({ variables: { questionId: q.id, text, authorName: name } })}
+                    onUpvote={() => handleUpvote(q.id)}
+                    onHighlight={() => highlightQuestion({ variables: { questionId: String(q.id), highlighted: !q.isHighlighted } })}
+                    onMarkAnswered={() => markAnswered({ variables: { questionId: String(q.id), answered: !q.isAnswered } })}
+                    onReply={(text: string, name: string) => replyToQuestion({ variables: { questionId: String(q.id), text, authorName: name } })}
                     isHighlighted
                   />
                 ))}
@@ -291,10 +343,10 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
               ) : (
                 sortedQuestions.map((q: QType, i: number) => (
                   <QuestionItem key={q.id} q={q} className={`animate-fade-in stagger-${Math.min(i + 1, 6)}`}
-                    onUpvote={() => upvoteQuestion({ variables: { questionId: q.id, voterToken } })}
-                    onHighlight={() => highlightQuestion({ variables: { questionId: q.id, highlighted: !q.isHighlighted } })}
-                    onMarkAnswered={() => markAnswered({ variables: { questionId: q.id, answered: !q.isAnswered } })}
-                    onReply={(text: string, name: string) => replyToQuestion({ variables: { questionId: q.id, text, authorName: name } })}
+                    onUpvote={() => handleUpvote(q.id)}
+                    onHighlight={() => highlightQuestion({ variables: { questionId: String(q.id), highlighted: !q.isHighlighted } })}
+                    onMarkAnswered={() => markAnswered({ variables: { questionId: String(q.id), answered: !q.isAnswered } })}
+                    onReply={(text: string, name: string) => replyToQuestion({ variables: { questionId: String(q.id), text, authorName: name } })}
                   />
                 ))
               )}
@@ -308,11 +360,11 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
             <button onClick={() => setShowCreators({ ...showCreators, poll: !showCreators.poll })} className="text-xs font-medium" style={{ color: 'var(--accent)' }}>
               {showCreators.poll ? 'Hide Creator' : '+ Create Poll'}
             </button>
-            {showCreators.poll && <PollCreator sessionId={session.id} onCreated={() => { refetch(); setShowCreators({ ...showCreators, poll: false }); }} />}
+            {showCreators.poll && <PollCreator sessionId={String(session.id)} onCreated={() => { refetch(); refreshDO(); setShowCreators({ ...showCreators, poll: false }); }} />}
             {session.polls?.length === 0 ? (
               <div className="text-center py-12 rounded-xl text-sm" style={{ background: 'var(--bg-raised)', border: '1px dashed var(--border)', color: 'var(--text-faint)' }}>No polls yet.</div>
             ) : (
-              session.polls?.map((poll: { id: string }) => <PollCard key={poll.id} poll={poll} voterToken={voterToken} isCreator />)
+              session.polls?.map((poll) => <PollCard key={String(poll.id)} poll={poll} voterToken={voterToken} isCreator />)
             )}
           </div>
         )}
@@ -323,11 +375,11 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
             <button onClick={() => setShowCreators({ ...showCreators, quiz: !showCreators.quiz })} className="text-xs font-medium" style={{ color: 'var(--accent)' }}>
               {showCreators.quiz ? 'Hide Creator' : '+ Create Quiz'}
             </button>
-            {showCreators.quiz && <QuizCreator sessionId={session.id} onCreated={() => { refetch(); setShowCreators({ ...showCreators, quiz: false }); }} />}
+            {showCreators.quiz && <QuizCreator sessionId={String(session.id)} onCreated={() => { refetch(); refreshDO(); setShowCreators({ ...showCreators, quiz: false }); }} />}
             {session.quizzes?.length === 0 ? (
               <div className="text-center py-12 rounded-xl text-sm" style={{ background: 'var(--bg-raised)', border: '1px dashed var(--border)', color: 'var(--text-faint)' }}>No quizzes yet.</div>
             ) : (
-              session.quizzes?.map((quiz: { id: string }) => <QuizPlayer key={quiz.id} quiz={quiz} voterToken={voterToken} isCreator />)
+              session.quizzes?.map((quiz) => <QuizPlayer key={String(quiz.id)} quiz={quiz} voterToken={voterToken} isCreator />)
             )}
           </div>
         )}
@@ -338,11 +390,11 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
             <button onClick={() => setShowCreators({ ...showCreators, survey: !showCreators.survey })} className="text-xs font-medium" style={{ color: 'var(--accent)' }}>
               {showCreators.survey ? 'Hide Creator' : '+ Create Survey'}
             </button>
-            {showCreators.survey && <SurveyCreator sessionId={session.id} onCreated={() => { refetch(); setShowCreators({ ...showCreators, survey: false }); }} />}
+            {showCreators.survey && <SurveyCreator sessionId={String(session.id)} onCreated={() => { refetch(); refreshDO(); setShowCreators({ ...showCreators, survey: false }); }} />}
             {session.surveys?.length === 0 ? (
               <div className="text-center py-12 rounded-xl text-sm" style={{ background: 'var(--bg-raised)', border: '1px dashed var(--border)', color: 'var(--text-faint)' }}>No surveys yet.</div>
             ) : (
-              session.surveys?.map((survey: { id: string }) => <SurveyCard key={survey.id} survey={survey} voterToken={voterToken} isCreator />)
+              session.surveys?.map((survey) => <SurveyCard key={String(survey.id)} survey={survey} voterToken={voterToken} isCreator />)
             )}
           </div>
         )}
@@ -354,7 +406,7 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
 function QuestionItem({
   q, onUpvote, onHighlight, onMarkAnswered, onReply, isHighlighted, className = '',
 }: {
-  q: { id: string; text: string; authorName: string | null; isAnswered: boolean; upvoteCount: number; isHighlighted: boolean; replies?: { id: string; text: string; authorName: string; createdAt: string }[] };
+  q: { id: string | number; text: string; authorName: string | null; isAnswered: boolean; upvoteCount: number; isHighlighted: boolean; replies?: { id: string | number; text: string; authorName: string; createdAt: string }[] };
   onUpvote: () => void; onHighlight: () => void; onMarkAnswered: () => void; onReply: (text: string, name: string) => void;
   isHighlighted?: boolean; className?: string;
 }) {
