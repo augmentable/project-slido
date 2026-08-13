@@ -5,8 +5,6 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { gql } from '@apollo/client';
 import { useLazyQuery, useMutation } from '@apollo/client/react';
-import { ThemePicker } from '@/components/ThemePicker';
-import { useTheme } from '@/components/ThemeProvider';
 
 const CREATE_SESSION = gql`
   mutation CreateSession($title: String!, $code: String!, $isModerated: Boolean, $passcode: String, $authToken: String) {
@@ -58,13 +56,11 @@ interface GetSessionData { session: { id: string; code: string; title: string; i
 
 export default function HomePage() {
   const router = useRouter();
-  const { theme, setTheme } = useTheme();
 
   const [joinCode, setJoinCode] = useState('');
   const [joinPasscode, setJoinPasscode] = useState('');
   const [newTitle, setNewTitle] = useState('');
   const [newCode, setNewCode] = useState('');
-  const [isModerated, setIsModerated] = useState(false);
   const [newPasscode, setNewPasscode] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [needsPasscode, setNeedsPasscode] = useState(false);
@@ -159,7 +155,7 @@ export default function HomePage() {
     const codeFormatted = newCode.trim().toUpperCase();
     const authToken = localStorage.getItem('slido_auth_token') || null;
     try {
-      await createSession({ variables: { title: newTitle.trim(), code: codeFormatted, isModerated, passcode: newPasscode || null, authToken } });
+      await createSession({ variables: { title: newTitle.trim(), code: codeFormatted, isModerated: false, passcode: newPasscode || null, authToken } });
       router.push(`/session/${codeFormatted}`);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
@@ -168,35 +164,17 @@ export default function HomePage() {
   };
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center p-6 bg-dots-pattern relative">
+    <main className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 bg-dots-pattern relative overflow-x-hidden">
       <div className="absolute inset-0" style={{ background: 'var(--gradient-hero)' }} />
       <div className="relative z-10 max-w-md w-full space-y-8">
 
-        {/* Top bar */}
-        <div className="flex items-center justify-between animate-fade-in">
-          <div className="flex items-center gap-3">
-            <ThemePicker current={theme} onChange={setTheme} />
-            <Link href="/docs" className="text-xs font-medium hover:underline" style={{ color: 'var(--text-muted)' }}>Docs</Link>
-          </div>
-          {currentUser ? (
-            <div className="flex items-center gap-3">
-              <span className="text-sm" style={{ color: 'var(--accent)' }}>{currentUser.displayName}</span>
-              <button onClick={handleLogout} className="text-xs hover:underline" style={{ color: 'var(--text-muted)' }}>Logout</button>
-            </div>
-          ) : (
-            <button onClick={() => setShowAuth(!showAuth)} className="text-xs font-medium hover:underline" style={{ color: 'var(--accent)' }}>
-              Sign in
-            </button>
-          )}
-        </div>
-
         {/* Hero */}
         <div className="text-center space-y-3 animate-slide-up">
-          <h1 className="text-5xl font-black tracking-tight" style={{ fontFamily: "'Cabinet Grotesk', sans-serif", color: 'var(--text-strong)' }}>
-            Live<span style={{ color: 'var(--accent)' }}>Q&A</span>
+          <h1 className="text-4xl sm:text-5xl font-black tracking-tight" style={{ fontFamily: "'Cabinet Grotesk', sans-serif", color: 'var(--text-strong)' }}>
+            Live<span style={{ color: 'var(--accent)' }}>Topics</span>
           </h1>
           <p className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-            Real-time audience interaction &mdash; polls, quizzes &amp; surveys
+            Real-time audience interaction
           </p>
         </div>
 
@@ -242,7 +220,7 @@ export default function HomePage() {
           {/* Join */}
           <form onSubmit={handleJoin} className="space-y-3">
             <h2 className="text-lg font-bold" style={{ color: 'var(--text-strong)' }}>Join a Session</h2>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <input
                 type="text"
                 placeholder="Enter code e.g. AGENTNEWS"
@@ -270,14 +248,23 @@ export default function HomePage() {
             <input type="text" placeholder="Session Title" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} className="themed-input w-full" />
             <input type="text" placeholder="Room Code" value={newCode} onChange={(e) => setNewCode(e.target.value)} className="themed-input w-full uppercase tracking-widest font-mono text-sm" />
             <input type="password" placeholder="Passcode (optional)" value={newPasscode} onChange={(e) => setNewPasscode(e.target.value)} className="themed-input w-full" />
-            <label className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: 'var(--text-muted)' }}>
-              <input type="checkbox" checked={isModerated} onChange={(e) => setIsModerated(e.target.checked)} className="rounded" style={{ accentColor: 'var(--accent)' }} />
-              Enable Q&A moderation
-            </label>
             <button type="submit" disabled={creating} className="themed-btn-ghost w-full">
               {creating ? 'Creating...' : 'Create Session'}
             </button>
           </form>
+        </div>
+        <div className="flex items-center justify-center gap-4 pt-2 animate-fade-in">
+          <Link href="/docs" className="text-xs font-medium hover:underline" style={{ color: 'var(--text-muted)' }}>Docs</Link>
+          {currentUser ? (
+            <div className="flex items-center gap-3">
+              <span className="text-sm" style={{ color: 'var(--accent)' }}>{currentUser.displayName}</span>
+              <button onClick={handleLogout} className="text-xs hover:underline" style={{ color: 'var(--text-muted)' }}>Logout</button>
+            </div>
+          ) : (
+            <button onClick={() => setShowAuth(!showAuth)} className="text-xs font-medium hover:underline" style={{ color: 'var(--accent)' }}>
+              Sign in
+            </button>
+          )}
         </div>
       </div>
     </main>

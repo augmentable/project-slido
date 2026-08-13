@@ -4,6 +4,8 @@ import * as s from '@/db/schema';
 import { eq, and, count, avg, sum, sql, desc, asc } from 'drizzle-orm';
 import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
+import { validateQuestionTitle } from '@/lib/question-title';
+import { isQuestionReactionId } from '@/lib/question-reactions';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'slido-clone-dev-secret';
 const MAX_TITLE_LENGTH = 200;
@@ -14,6 +16,33 @@ const CODE_PATTERN = /^[A-Z0-9_-]+$/;
 
 function hashPassword(pw: string) {
   return crypto.createHash('sha256').update(pw).digest('hex');
+}
+
+const OPENROUTER_KEY = 'openrouter_key';
+const ADMIN_PASSWORD_HASH = 'admin_password_hash';
+
+async function getAppSetting(db: Db, key: string): Promise<string | null> {
+  const [row] = await db.select().from(s.appSettings).where(eq(s.appSettings.key, key));
+  return row?.value ?? null;
+}
+
+async function setAppSetting(db: Db, key: string, value: string): Promise<void> {
+  await db.insert(s.appSettings).values({ key, value, updatedAt: new Date().toISOString() })
+    .onConflictDoUpdate({ target: s.appSettings.key, set: { value, updatedAt: new Date().toISOString() } });
+}
+
+async function requireAdmin(db: Db, adminToken: string): Promise<void> {
+  const expected = await getAppSetting(db, ADMIN_PASSWORD_HASH);
+  const token = adminToken?.trim();
+  if (!expected || !token || token !== expected) throw new Error('Admin authentication required');
+}
+
+async function loadAdminSettings(db: Db): Promise<{ openrouterKeySet: boolean; openrouterKeyPreview: string | null }> {
+  const key = (await getAppSetting(db, OPENROUTER_KEY))?.trim() ?? '';
+  return {
+    openrouterKeySet: key.length > 0,
+    openrouterKeyPreview: key ? `${key.slice(0, 6)}…${key.slice(-4)}` : null,
+  };
 }
 
 // ── Schema ──
@@ -38,6 +67,13 @@ const schema = createSchema({
       title: String!
       isModerated: Boolean!
       isPasswordProtected: Boolean!
+      pollsEnabled: Boolean!
+      quizzesEnabled: Boolean!
+      repliesEnabled: Boolean!
+      surveysEnabled: Boolean!
+      votesEnabled: Boolean!
+      saturdayBannerEnabled: Boolean!
+      reactionsEnabled: Boolean!
       primaryColor: String
       logoUrl: String
       owner: User
@@ -50,14 +86,32 @@ const schema = createSchema({
 
     type Question {
       id: ID!
+      title: String!
       text: String!
       authorName: String
       isApproved: Boolean!
       isHighlighted: Boolean!
       isAnswered: Boolean!
       upvoteCount: Int!
+      downvoteCount: Int!
+      score: Int!
+      reactions: [QuestionReaction!]!
       replies: [Reply!]!
       createdAt: String!
+    }
+
+    type QuestionReaction {
+      emoji: String!
+      count: Int!
+    }
+
+    type AdminAuthPayload {
+      token: String!
+    }
+
+    type AdminSettings {
+      openrouterKeySet: Boolean!
+      openrouterKeyPreview: String
     }
 
     type Reply {
@@ -207,6 +261,7 @@ const schema = createSchema({
       quizLeaderboard(quizId: String!): [LeaderboardEntry!]!
       survey(surveyId: String!): Survey
       sessionAnalytics(sessionId: String!): SessionAnalytics!
+      adminSettings(adminToken: String!): AdminSettings!
     }
 
     type Mutation {
@@ -214,13 +269,17 @@ const schema = createSchema({
       login(email: String!, password: String!): AuthPayload!
       createSession(title: String!, code: String!, isModerated: Boolean, passcode: String, authToken: String): Session!
       updateSessionBranding(sessionId: String!, primaryColor: String, logoUrl: String): Session!
-      createQuestion(sessionId: String!, text: String!, authorName: String): Question!
+      updateSessionFeatures(sessionId: String!, pollsEnabled: Boolean, quizzesEnabled: Boolean, repliesEnabled: Boolean, surveysEnabled: Boolean, votesEnabled: Boolean, saturdayBannerEnabled: Boolean, reactionsEnabled: Boolean): Session!
+      adminLogin(password: String!): AdminAuthPayload!
+      setOpenrouterKey(adminToken: String!, key: String!): AdminSettings!
+      createQuestion(sessionId: String!, title: String!, text: String, authorName: String): Question!
       approveQuestion(questionId: String!): Question!
       rejectQuestion(questionId: String!): Boolean!
       highlightQuestion(questionId: String!, highlighted: Boolean!): Question!
       markAsAnswered(questionId: String!, answered: Boolean!): Question!
       replyToQuestion(questionId: String!, text: String!, authorName: String!): Reply!
-      upvoteQuestion(questionId: String!, voterToken: String!): Question!
+      voteQuestion(questionId: String!, voterToken: String!, value: Int!): Question!
+      reactToQuestion(questionId: String!, voterToken: String!, emoji: String!): Question!
       createPoll(sessionId: String!, type: String!, question: String!, options: [String!], allowMultiple: Boolean): Poll!
       activatePoll(pollId: String!): Poll!
       deactivatePoll(pollId: String!): Poll!
@@ -269,7 +328,7 @@ const schema = createSchema({
           where: eq(s.sessions.code, sanitized),
           with: {
             owner: true,
-            questions: { with: { replies: true, upvotes: true }, orderBy: [desc(s.questions.createdAt)] },
+            questions: { with: { replies: true, upvotes: true, reactions: true }, orderBy: [desc(s.questions.createdAt)] },
             polls: { with: { options: true, responses: { with: { selectedOption: true } } } },
             quizzes: { with: { questions: { with: { options: true }, orderBy: [asc(s.quizQuestions.position)] } } },
             surveys: { with: { questions: { with: { options: true }, orderBy: [asc(s.surveyQuestions.position)] } } },
@@ -287,10 +346,22 @@ const schema = createSchema({
           questionsList = questionsList.filter((q) => q.isApproved);
         }
 
-        const questionsWithCounts = questionsList.map((q) => ({
-          ...q,
-          _upvoteCount: q.upvotes?.length ?? 0,
-        }));
+        const questionsWithCounts = questionsList.map((q) => {
+          const votes = q.upvotes ?? [];
+          const ups = votes.filter((v) => v.value === 1).length;
+          const downs = votes.filter((v) => v.value === -1).length;
+          const reactionCounts = new Map<string, number>();
+          for (const reaction of q.reactions ?? []) {
+            reactionCounts.set(reaction.emoji, (reactionCounts.get(reaction.emoji) ?? 0) + 1);
+          }
+          return {
+            ...q,
+            _upvoteCount: ups,
+            _downvoteCount: downs,
+            _score: ups - downs,
+            _reactions: [...reactionCounts].map(([emoji, count]) => ({ emoji, count })),
+          };
+        });
 
         const pollsWithCounts = (result.polls || []).map((p) => ({
           ...p,
@@ -407,6 +478,12 @@ const schema = createSchema({
           totalSurveyResponses: srCount.c,
         };
       },
+
+      // ── Admin ──
+      adminSettings: async (_: unknown, { adminToken }: { adminToken: string }, { db }: Ctx) => {
+        await requireAdmin(db, adminToken);
+        return loadAdminSettings(db);
+      },
     },
 
     Mutation: {
@@ -479,22 +556,67 @@ const schema = createSchema({
         return { ...updated, isPasswordProtected: !!updated.passcodeHash };
       },
 
+      updateSessionFeatures: async (_: unknown, args: { sessionId: string; pollsEnabled?: boolean; quizzesEnabled?: boolean; repliesEnabled?: boolean; surveysEnabled?: boolean; votesEnabled?: boolean; saturdayBannerEnabled?: boolean; reactionsEnabled?: boolean }, { db }: Ctx) => {
+        const [session] = await db.select().from(s.sessions).where(eq(s.sessions.id, Number(args.sessionId)));
+        if (!session) throw new Error('Session not found');
+
+        const updates: Record<string, unknown> = {};
+        if (args.pollsEnabled !== undefined) updates.pollsEnabled = args.pollsEnabled;
+        if (args.quizzesEnabled !== undefined) updates.quizzesEnabled = args.quizzesEnabled;
+        if (args.repliesEnabled !== undefined) updates.repliesEnabled = args.repliesEnabled;
+        if (args.surveysEnabled !== undefined) updates.surveysEnabled = args.surveysEnabled;
+        if (args.votesEnabled !== undefined) updates.votesEnabled = args.votesEnabled;
+        if (args.saturdayBannerEnabled !== undefined) updates.saturdayBannerEnabled = args.saturdayBannerEnabled;
+        if (args.reactionsEnabled !== undefined) updates.reactionsEnabled = args.reactionsEnabled;
+
+        const [updated] = Object.keys(updates).length
+          ? await db.update(s.sessions).set(updates).where(eq(s.sessions.id, session.id)).returning()
+          : [session];
+        return { ...updated, isPasswordProtected: !!updated.passcodeHash };
+      },
+
+      // ── Admin ──
+      adminLogin: async (_: unknown, { password }: { password: string }, { db }: Ctx) => {
+        const supplied = password?.trim() ?? '';
+        if (!supplied) throw new Error('Invalid admin password');
+
+        const hashed = hashPassword(supplied);
+        const stored = await getAppSetting(db, ADMIN_PASSWORD_HASH);
+
+        if (!stored) {
+          const envPassword = process.env.ADMIN_PASSWORD?.trim() ?? '';
+          if (!envPassword || supplied !== envPassword) throw new Error('Invalid admin password');
+          await setAppSetting(db, ADMIN_PASSWORD_HASH, hashed);
+          return { token: hashed };
+        }
+
+        if (hashed !== stored) throw new Error('Invalid admin password');
+        return { token: hashed };
+      },
+
+      setOpenrouterKey: async (_: unknown, { adminToken, key }: { adminToken: string; key: string }, { db }: Ctx) => {
+        await requireAdmin(db, adminToken);
+        await setAppSetting(db, OPENROUTER_KEY, key.trim());
+        return loadAdminSettings(db);
+      },
+
       // ── Questions ──
-      createQuestion: async (_: unknown, args: { sessionId: string; text: string; authorName?: string }, { db }: Ctx) => {
-        const trimmedText = args.text.trim().slice(0, MAX_QUESTION_LENGTH);
-        if (!trimmedText) throw new Error('Question text is required');
+      createQuestion: async (_: unknown, args: { sessionId: string; title: string; text?: string; authorName?: string }, { db }: Ctx) => {
+        const title = validateQuestionTitle(args.title ?? '');
+        const trimmedText = (args.text ?? '').trim().slice(0, MAX_QUESTION_LENGTH);
 
         const [session] = await db.select().from(s.sessions).where(eq(s.sessions.id, Number(args.sessionId)));
         if (!session) throw new Error('Session not found');
 
         const [question] = await db.insert(s.questions).values({
+          title,
           text: trimmedText,
           authorName: args.authorName?.trim().slice(0, MAX_NAME_LENGTH) || null,
           isApproved: !session.isModerated,
           sessionId: session.id,
         }).returning();
 
-        return { ...question, upvoteCount: 0, replies: [] };
+        return { ...question, _upvoteCount: 0, _downvoteCount: 0, _score: 0, reactions: [], replies: [] };
       },
 
       approveQuestion: async (_: unknown, { questionId }: { questionId: string }, { db }: Ctx) => {
@@ -533,21 +655,50 @@ const schema = createSchema({
         return reply;
       },
 
-      upvoteQuestion: async (_: unknown, args: { questionId: string; voterToken: string }, { db }: Ctx) => {
+      voteQuestion: async (_: unknown, args: { questionId: string; voterToken: string; value: number }, { db }: Ctx) => {
         const qid = Number(args.questionId);
         const sanitizedToken = args.voterToken.trim().slice(0, 64);
         if (!sanitizedToken) throw new Error('Voter token is required');
+        if (args.value !== 1 && args.value !== -1) throw new Error('Vote value must be 1 or -1');
 
-        const existing = await db.select().from(s.upvotes)
+        const [existing] = await db.select().from(s.upvotes)
           .where(and(eq(s.upvotes.questionId, qid), eq(s.upvotes.voterToken, sanitizedToken)));
 
-        if (!existing.length) {
-          await db.insert(s.upvotes).values({ questionId: qid, voterToken: sanitizedToken });
+        if (!existing) {
+          await db.insert(s.upvotes).values({ questionId: qid, voterToken: sanitizedToken, value: args.value });
+        } else if (existing.value === args.value) {
+          await db.delete(s.upvotes).where(eq(s.upvotes.id, existing.id));
+        } else {
+          await db.update(s.upvotes).set({ value: args.value }).where(eq(s.upvotes.id, existing.id));
         }
 
         const [question] = await db.select().from(s.questions).where(eq(s.questions.id, qid));
         if (!question) throw new Error('Question not found');
-        return { ...question, upvoteCount: 0, replies: [] };
+        return question;
+      },
+
+      reactToQuestion: async (_: unknown, args: { questionId: string; voterToken: string; emoji: string }, { db }: Ctx) => {
+        const qid = Number(args.questionId);
+        const sanitizedToken = args.voterToken.trim().slice(0, 64);
+        if (!sanitizedToken) throw new Error('Voter token is required');
+        if (!isQuestionReactionId(args.emoji)) throw new Error('Invalid reaction');
+
+        const [existing] = await db.select().from(s.questionReactions)
+          .where(and(
+            eq(s.questionReactions.questionId, qid),
+            eq(s.questionReactions.voterToken, sanitizedToken),
+            eq(s.questionReactions.emoji, args.emoji),
+          ));
+
+        if (existing) {
+          await db.delete(s.questionReactions).where(eq(s.questionReactions.id, existing.id));
+        } else {
+          await db.insert(s.questionReactions).values({ questionId: qid, voterToken: sanitizedToken, emoji: args.emoji });
+        }
+
+        const [question] = await db.select().from(s.questions).where(eq(s.questions.id, qid));
+        if (!question) throw new Error('Question not found');
+        return question;
       },
 
       // ── Polls ──
@@ -770,10 +921,32 @@ const schema = createSchema({
 
     // ── Field Resolvers ──
     Question: {
+      title: (parent: { title?: string | null; text?: string | null }) => parent.title?.trim() || (parent.text ?? '').trim().slice(0, 80) || 'Untitled',
       upvoteCount: async (parent: { id: number; _upvoteCount?: number }, _: unknown, { db }: Ctx) => {
         if (parent._upvoteCount !== undefined) return parent._upvoteCount;
-        const [result] = await db.select({ c: count() }).from(s.upvotes).where(eq(s.upvotes.questionId, parent.id));
+        const [result] = await db.select({ c: count() }).from(s.upvotes)
+          .where(and(eq(s.upvotes.questionId, parent.id), eq(s.upvotes.value, 1)));
         return result.c;
+      },
+      downvoteCount: async (parent: { id: number; _downvoteCount?: number }, _: unknown, { db }: Ctx) => {
+        if (parent._downvoteCount !== undefined) return parent._downvoteCount;
+        const [result] = await db.select({ c: count() }).from(s.upvotes)
+          .where(and(eq(s.upvotes.questionId, parent.id), eq(s.upvotes.value, -1)));
+        return result.c;
+      },
+      score: async (parent: { id: number; _score?: number }, _: unknown, { db }: Ctx) => {
+        if (parent._score !== undefined) return parent._score;
+        const [result] = await db.select({ total: sum(s.upvotes.value) }).from(s.upvotes)
+          .where(eq(s.upvotes.questionId, parent.id));
+        return Number(result.total) || 0;
+      },
+      reactions: async (parent: { id: number; _reactions?: { emoji: string; count: number }[] }, _: unknown, { db }: Ctx) => {
+        if (parent._reactions !== undefined) return parent._reactions;
+        const rows = await db.select({ emoji: s.questionReactions.emoji, c: count() })
+          .from(s.questionReactions)
+          .where(eq(s.questionReactions.questionId, parent.id))
+          .groupBy(s.questionReactions.emoji);
+        return rows.map((r) => ({ emoji: r.emoji, count: Number(r.c) }));
       },
       replies: async (parent: { id: number; replies?: unknown[] }, _: unknown, { db }: Ctx) => {
         if (parent.replies && Array.isArray(parent.replies)) return parent.replies;

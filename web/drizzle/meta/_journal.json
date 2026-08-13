@@ -8,6 +8,34 @@
       "when": 1786381959184,
       "tag": "0000_far_deadpool",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1786579200000,
+      "tag": "0001_question_votes_reactions",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786626038396,
+      "tag": "0002_admin_settings_feature_flags",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1786640000000,
+      "tag": "0003_reactions_enabled",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1786632183575,
+      "tag": "0004_surveys_off_by_default",
+      "breakpoints": true
     }
   ]
 }

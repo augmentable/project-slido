@@ -2,8 +2,9 @@
 
 export type ClientMessage =
   | { type: 'subscribe'; code: string }
-  | { type: 'upvote'; questionId: number; voterToken: string }
-  | { type: 'createQuestion'; text: string; authorName?: string }
+  | { type: 'vote'; questionId: number; voterToken: string; value: 1 | -1 }
+  | { type: 'react'; questionId: number; voterToken: string; emoji: string }
+  | { type: 'createQuestion'; title: string; text?: string; authorName?: string }
   | { type: 'submitPollResponse'; pollId: number; voterToken: string; selectedOptionId?: number; textValue?: string; ratingValue?: number; rankingOrder?: string[] }
   | { type: 'submitQuizAnswer'; quizQuestionId: number; selectedOptionId: number; voterToken: string; answeredInMs: number }
   | { type: 'refresh' };
@@ -16,6 +17,13 @@ export interface SessionState {
   title: string;
   isModerated: boolean;
   isPasswordProtected: boolean;
+  pollsEnabled: boolean;
+  quizzesEnabled: boolean;
+  repliesEnabled: boolean;
+  surveysEnabled: boolean;
+  votesEnabled: boolean;
+  saturdayBannerEnabled: boolean;
+  reactionsEnabled: boolean;
   primaryColor: string | null;
   logoUrl: string | null;
   owner: { id: number; displayName: string } | null;
@@ -27,12 +35,16 @@ export interface SessionState {
 
 export interface QuestionState {
   id: number;
+  title: string;
   text: string;
   authorName: string | null;
   isApproved: boolean;
   isHighlighted: boolean;
   isAnswered: boolean;
   upvoteCount: number;
+  downvoteCount: number;
+  score: number;
+  reactions: { emoji: string; count: number }[];
   replies: ReplyState[];
   createdAt: string;
 }

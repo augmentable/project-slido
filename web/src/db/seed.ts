@@ -36,7 +36,7 @@ function seed() {
     'survey_answers', 'survey_responses', 'survey_options', 'survey_questions', 'surveys',
     'quiz_answers', 'quiz_options', 'quiz_questions', 'quizzes',
     'poll_responses', 'poll_options', 'polls',
-    'replies', 'upvotes', 'questions', 'sessions', 'users',
+    'replies', 'question_reactions', 'upvotes', 'questions', 'sessions', 'users',
   ];
   for (const t of tables) {
     sqliteDb.exec(`DELETE FROM ${t}`);
@@ -58,7 +58,7 @@ function seed() {
 
   // ── Session ──
   const session = db.insert(schema.sessions).values({
-    title: 'Slido Clone: Feature Prioritization',
+    title: 'lotf discussion ideas',
     code: 'SLIDODEV',
     isModerated: false,
     ownerId: host.id,
@@ -66,28 +66,65 @@ function seed() {
 
   // ── Questions ──
   const questionsData = [
-    { text: 'Should we prioritize real-time collaboration features like Google Docs-style co-editing of polls, or keep the current single-author model?', authorName: 'Alice Park', upvotes: 12, highlighted: true },
-    { text: 'How are we planning to handle user authentication? JWT tokens seem fine for an MVP, but should we consider OAuth2 with Google/GitHub for a smoother sign-up experience?', authorName: 'Bob Martinez', upvotes: 18, answered: true },
-    { text: 'The word cloud feature looks cool but feels like a nice-to-have. Can we defer it and focus on getting the presenter mode right first?', authorName: 'Carol Davis', upvotes: 9 },
-    { text: 'What about mobile responsiveness? I tried the app on my phone and the quiz timer buttons are tiny. Should we adopt a mobile-first approach?', authorName: 'Dave Wilson', upvotes: 15 },
-    { text: 'Can we add a "duplicate session" feature? As a host I want to reuse my poll/quiz templates across different meetings without recreating everything.', authorName: 'Eve Thompson', upvotes: 22 },
-    { text: 'The analytics dashboard is great but lacks export to PDF. CSV is fine for data nerds but most managers want a nice visual report. Worth adding?', authorName: 'Frank Lee', upvotes: 7 },
-    { text: "Has anyone thought about accessibility? Screen readers can't navigate the quiz countdown timer properly. We should add ARIA labels.", authorName: 'Grace Kim', upvotes: 14 },
-    { text: 'Integration with Slack would be massive. Imagine getting a notification when someone asks a question in your session. Is this feasible with webhooks?', authorName: null, upvotes: 11 },
-    { text: 'For the ranking poll type, can we add drag-and-drop reordering? The current click-to-rank feels clunky compared to what Mentimeter offers.', authorName: 'Alice Park', upvotes: 6 },
-    { text: "Should we consider adding a \"hand raise\" feature alongside Q&A? In hybrid meetings, remote participants often get overlooked.", authorName: 'Heidi Nakamura', upvotes: 8 },
-    { text: "What's our strategy for handling concurrent sessions? If 500 people join at once, will the WebSocket server hold up?", authorName: 'Bob Martinez', upvotes: 19 },
-    { text: 'Can we add emoji reactions to questions instead of just upvotes? Something like thumbs-up, heart, laughing, thinking would give richer signal about audience sentiment.', authorName: 'Carol Davis', upvotes: 5 },
+    {
+      title: 'Minimum viable intelligence vs intelligencemaxing',
+      text: 'i would like to discuss the strategy of using the minimum viable intelligence for tasks going forward, as perhaps a worker whose intelligence barely crosses the bar for the task will follow instructions best and communicate most plainly.\n\nas opposed to intelligencemaxing, where on the upside you may get a genius who does things in an elegant and efficient way but on the downside might instead do midwit overengineering and communicate with you in a faux-intelligent way that gives you a headache',
+      authorName: null,
+      upvotes: 1,
+    },
+    {
+      title: 'Enforcing clean code on agent output',
+      text: 'Best effective ways to enforce clean code principles on agent output.\n\nStatic analyzers like SonarQube?\nAgentic code review passes?\nSkills with lots of instructions?\n\nWhat actually works and performs great vs. hype/speculation.',
+      authorName: 'Omer Gilad',
+      upvotes: 1,
+    },
+    {
+      title: 'Are models too smart for humans',
+      text: 'Are modern models becoming too smart for humans to work with?\n\nOpus 5 / GPT5.6 Sol outputting incomprehensible condensed English with jargon, we need to add special instructions such as Simplified Technical English or new skills to humanize them.\n\nWill we get to the point that models create implementations and architecture that we can\'t understand and own?',
+      authorName: 'Omer Gilad',
+      upvotes: 1,
+    },
+    {
+      title: 'Better password and token management',
+      text: 'What are the easy ways to manage passwords/tokrns better than all in one .env.local? Split into multiple env2.local etc? How to prevent agents from accessing?',
+      authorName: 'Slava',
+      upvotes: 1,
+    },
+    {
+      title: 'Vercel agent software factory',
+      text: "vercel's agent software factory. template to copy? notice big problems?\n\nhttps://vercel.com/blog/building-a-software-factory-for-ai-sdk",
+      authorName: 'nick',
+      upvotes: 1,
+    },
+    {
+      title: 'Long session vs new session strategies',
+      text: 'agent strategies:\n1. one long running session to manage a concern/project - gpt style\n2. creating new sessions per concern\n3. others??',
+      authorName: 'nick',
+      upvotes: 1,
+    },
+    {
+      title: 'Agent app architectures compared',
+      text: 'agent app architectures: grok bot (cursor shared computer paired with remote agents) vs cloudflare OS vs claude tag',
+      authorName: 'nick',
+      upvotes: 1,
+    },
+    {
+      title: 'Remote agents: orbs and others',
+      text: 'remote agents: "orbs", exe dev, cursor agents, others',
+      authorName: 'nick',
+      upvotes: 1,
+    },
   ];
 
   const savedQuestions: { id: number }[] = [];
   for (const qd of questionsData) {
     const q = db.insert(schema.questions).values({
+      title: qd.title,
       text: qd.text,
       authorName: qd.authorName,
       isApproved: true,
-      isHighlighted: qd.highlighted ?? false,
-      isAnswered: qd.answered ?? false,
+      isHighlighted: false,
+      isAnswered: false,
       sessionId: session.id,
     }).returning().get();
     savedQuestions.push(q);
@@ -99,12 +136,7 @@ function seed() {
   }
 
   // ── Replies ──
-  db.insert(schema.replies).values([
-    { text: 'Great question! We decided on JWT for the MVP, with OAuth2 (Google + GitHub) planned for v2. The auth system is now live with email/password.', authorName: 'Sarah Chen', questionId: savedQuestions[1].id },
-    { text: "Agreed on mobile — I've filed this as a high priority. We'll do a responsive pass before the next demo.", authorName: 'Sarah Chen', questionId: savedQuestions[3].id },
-    { text: 'Session templates are a great idea. Adding to the Phase 2 backlog. For now you can manually recreate, but a "clone session" button is coming.', authorName: 'Sarah Chen', questionId: savedQuestions[4].id },
-    { text: "We're using graphql-ws with an in-memory PubSub which won't scale past a single server. For production we'd need Redis PubSub. Good call to flag this early.", authorName: 'Bob Martinez', questionId: savedQuestions[10].id },
-  ]).run();
+  // No host replies on the live discussion seed.
 
   // ── Poll 1: Multiple Choice ──
   const poll1 = db.insert(schema.polls).values({

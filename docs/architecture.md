@@ -5,8 +5,9 @@ Real-Time Slido Clone — Next.js + GraphQL Yoga + Durable Objects + Cloudflare 
 ---
 
 ## System Overview
+The app is a real-time audience interaction platform: Q&A with titled questions, up/down votes, emoji reactions, live polls (5 types), timed quizzes with leaderboards, and multi-question surveys.
 
-The app is a real-time audience interaction platform: Q&A with upvoting, live polls (5 types), timed quizzes with leaderboards, and multi-question surveys. It runs as a single Cloudflare Worker with Durable Objects for real-time WebSocket communication and D1 for persistence.
+It runs as a single Cloudflare Worker with Durable Objects for real-time WebSocket communication and D1 for persistence.
 
 | Layer | Technology | Role |
 |-------|-----------|------|
@@ -24,11 +25,11 @@ The app is a real-time audience interaction platform: Q&A with upvoting, live po
 | Charts | Recharts | Analytics dashboards and poll results |
 | Testing | Vitest + @cloudflare/vitest-pool-workers | Worker-compatible test runner |
 
-**Real-time strategy:** The app uses a **Durable Object per session** to hold WebSocket connections and broadcast state changes instantly. High-frequency audience actions (upvotes, poll responses, new questions) are applied to in-memory state and broadcast within microseconds, with D1 writes batched via alarm-based write-behind (1s debounce). Apollo polling (3s) is the automatic fallback when WebSocket is unavailable.
+**Real-time strategy:** The app uses a **Durable Object per session** to hold WebSocket connections and broadcast state changes instantly. High-frequency audience actions (votes, reactions, poll responses, new questions) are applied to in-memory state and broadcast within microseconds, with D1 writes batched via alarm-based write-behind (1s debounce). Apollo polling (3s) is the automatic fallback when WebSocket is unavailable.
 
 ---
 
-## Database Schema — 17 Tables
+## Database Schema — 18 Tables
 
 All tables use integer auto-increment primary keys. Foreign keys cascade on delete (except `users → sessions` which sets null). Booleans are stored as integers with Drizzle's `mode: 'boolean'` mapping. Timestamps default to `CURRENT_TIMESTAMP`.
 
@@ -39,6 +40,7 @@ users
   └── sessions
         ├── questions
         │     ├── upvotes
+        │     ├── question_reactions
         │     └── replies
         ├── polls
         │     ├── poll_options
@@ -67,8 +69,9 @@ users
 
 | Table | Key Columns | Notes |
 |-------|------------|-------|
-| `questions` | id, text, author_name?, is_approved, is_highlighted, is_answered, session_id FK | Moderated sessions require approval |
-| `upvotes` | id, voter_token, question_id FK | UNIQUE(voter_token, question_id) prevents double-voting |
+| `questions` | id, title, text, author_name?, is_approved, is_highlighted, is_answered, session_id FK | Required title is 10 words or fewer; body text is optional |
+| `upvotes` | id, voter_token, question_id FK, value | UNIQUE(voter_token, question_id); value is 1 or -1; same vote toggles off |
+| `question_reactions` | id, voter_token, question_id FK, emoji | UNIQUE(voter_token, question_id, emoji); each reaction toggles independently |
 | `replies` | id, text, author_name, question_id FK | Threaded replies from host or participants |
 
 #### Polls
@@ -221,11 +224,12 @@ On each request, Yoga's context factory calls `getDbFromContext()` to resolve th
 | `register` / `login` | Email/password auth, returns JWT + user |
 | `createSession` | New session with optional passcode and owner binding |
 | `updateSessionBranding` | Set primary color and logo URL |
-| `createQuestion` | Post question (auto-approved unless moderated) |
+| `createQuestion` | Post a required ≤10-word title with optional body (auto-approved unless moderated) |
 | `approveQuestion` / `rejectQuestion` | Moderation actions |
 | `highlightQuestion` / `markAsAnswered` | Host curation controls |
 | `replyToQuestion` | Threaded reply from host or participant |
-| `upvoteQuestion` | Idempotent upvote (one per voter_token) |
+| `voteQuestion` | One vote per voter_token; upvote/downvote toggles and switches direction |
+| `reactToQuestion` | Toggle one of five Slido reactions per voter_token |
 | `createPoll` / `activatePoll` / `deactivatePoll` | Poll lifecycle |
 | `submitPollResponse` | MC, rating, word cloud, ranking, or open text |
 | `createQuiz` / `addQuizQuestion` | Quiz authoring with correct answer |
@@ -238,14 +242,15 @@ On each request, Yoga's context factory calls `getDbFromContext()` to resolve th
 
 | Type | Field | Implementation |
 |------|-------|---------------|
-| Question | upvoteCount | `COUNT(*)` from upvotes per question |
+| Question | upvoteCount / downvoteCount / score | Counts from `upvotes.value` (1 / -1 / net) |
+| Question | reactions | Grouped `{ emoji, count }` from `question_reactions` |
 | Question | replies | Returns eager-loaded array, or falls back to query |
 | Poll | responseCount | `COUNT(*)` from poll_responses per poll |
 | PollOption | voteCount | `COUNT(*)` from poll_responses per option |
 | PollResponse | rankingOrder | `JSON.parse()` of the stored string |
 | Survey | responseCount | `COUNT(*)` from survey_responses per survey |
 
-> **N+1 optimization:** The session query eager-loads upvotes and poll responses in the initial Drizzle `findFirst`, computing `upvoteCount`, `responseCount`, and `voteCount` in-memory. Field resolvers accept pre-computed `_upvoteCount` / `_voteCount` values when present, falling back to individual COUNT queries only when a question or option is fetched outside a session context.
+> **N+1 optimization:** The session query eager-loads upvotes, reactions, and poll responses in the initial Drizzle `findFirst`, computing vote counts, reaction counts, `responseCount`, and `voteCount` in-memory. Field resolvers accept pre-computed `_upvoteCount` / `_downvoteCount` / `_score` / `_reactions` values when present, falling back to individual COUNT queries only when a question is fetched outside a session context.
 
 ---
 
@@ -267,8 +272,8 @@ Browser (WebSocket) → Worker (intercepts upgrade) → SessionDO → In-Memory 
 | 2 | Worker fetch handler | Detects `Upgrade: websocket` header, resolves the DO by `env.SESSION_DO.idFromName(code)`, forwards request. |
 | 3 | SessionDO.fetch | Creates WebSocket pair via `new WebSocketPair()`, calls `ctx.acceptWebSocket(server)` (Hibernation API). |
 | 4 | SessionDO | Loads full session state from D1 (first access only — cached thereafter). Sends `{ type: 'state', data: {...} }` to the new client. |
-| 5 | User action | Client sends `{ type: 'upvote', questionId: 42, voterToken: '...' }` over WebSocket. |
-| 6 | SessionDO.webSocketMessage | Applies mutation to in-memory `cachedState` instantly (e.g. `q.upvoteCount += 1`). Queues D1 write. |
+| 5 | User action | Client sends `{ type: 'vote', questionId: 42, voterToken: '...', value: 1 }` over WebSocket. |
+| 6 | SessionDO.webSocketMessage | Applies mutation to in-memory `cachedState` instantly (toggle/switch vote counts). Queues D1 write. |
 | 7 | Broadcast | Serializes cached state and sends to all connected WebSockets via `ctx.getWebSockets()`. |
 | 8 | Write-behind | Alarm fires after 1s debounce. Pending SQL statements are flushed to D1 via `env.DB.batch()`. |
 
@@ -289,8 +294,9 @@ The `useSessionSocket` hook attempts WebSocket connection with exponential backo
 | Direction | Message Type | Payload |
 |-----------|-------------|---------|
 | Client → DO | `subscribe` | `{ type: 'subscribe', code: 'SLIDODEV' }` |
-| Client → DO | `upvote` | `{ type: 'upvote', questionId, voterToken }` |
-| Client → DO | `createQuestion` | `{ type: 'createQuestion', text, authorName? }` |
+| Client → DO | `vote` | `{ type: 'vote', questionId, voterToken, value: 1 \| -1 }` |
+| Client → DO | `react` | `{ type: 'react', questionId, voterToken, emoji }` |
+| Client → DO | `createQuestion` | `{ type: 'createQuestion', title, text?, authorName? }` |
 | Client → DO | `submitPollResponse` | `{ type: 'submitPollResponse', pollId, voterToken, selectedOptionId?, ... }` |
 | Client → DO | `submitQuizAnswer` | `{ type: 'submitQuizAnswer', quizQuestionId, selectedOptionId, voterToken, answeredInMs }` |
 | Client → DO | `refresh` | `{ type: 'refresh' }` — triggers D1 reload + broadcast |
@@ -310,6 +316,7 @@ One Durable Object instance per session code. All clients viewing the same sessi
 - **Hibernation API** (`ctx.acceptWebSocket`, `webSocketMessage`, `webSocketClose`): DOs sleep between messages so idle WebSocket connections don't incur billing. On wake, the session code is restored from `ws.deserializeAttachment()` and state is reloaded from D1 if evicted.
 
 - **In-memory hot path:** Upvotes and poll responses are applied to `cachedState` in-memory and broadcast instantly. No D1 round-trip for the read side of high-frequency mutations.
+- **In-memory hot path:** Votes, reactions, and poll responses are applied to `cachedState` in-memory and broadcast instantly. No D1 round-trip for the read side of high-frequency mutations.
 
 - **Write-behind batching:** Pending D1 writes are queued as `{ sql, params }` tuples and flushed via the **Alarm API** (the only timer that survives hibernation). The alarm fires after a 1-second debounce. If the flush fails, writes are re-queued for retry on the next alarm.
 

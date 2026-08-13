@@ -1,4 +1,6 @@
 import type { ClientMessage, SessionState, QuestionState, PollState, PollOptionState } from '../lib/ws-protocol';
+import { validateQuestionTitle } from '../lib/question-title';
+import { isQuestionReactionId } from '../lib/question-reactions';
 
 interface Env {
   DB: D1Database;
@@ -30,6 +32,8 @@ export class SessionDO implements DurableObject {
   private sessionCode: string | null = null;
   private cachedState: SessionState | null = null;
   private pendingWrites: PendingWrite[] = [];
+  private votes = new Map<string, 1 | -1>();
+  private reactionKeys = new Set<string>();
   private alarmScheduled = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -91,12 +95,16 @@ export class SessionDO implements DurableObject {
           await this.sendStateTo(ws);
           break;
 
-        case 'upvote':
-          await this.handleUpvote(msg.questionId, msg.voterToken);
+        case 'vote':
+          await this.handleVote(msg.questionId, msg.voterToken, msg.value);
+          break;
+
+        case 'react':
+          await this.handleReact(msg.questionId, msg.voterToken, msg.emoji);
           break;
 
         case 'createQuestion':
-          await this.handleCreateQuestion(msg.text, msg.authorName);
+          await this.handleCreateQuestion(msg.title, msg.text, msg.authorName);
           break;
 
         case 'submitPollResponse':
@@ -143,9 +151,10 @@ export class SessionDO implements DurableObject {
   // Each handler: validates, applies to cachedState in-memory, queues a D1
   // write, schedules the flush alarm, and broadcasts instantly.
 
-  private async handleUpvote(questionId: number, voterToken: string): Promise<void> {
+  private async handleVote(questionId: number, voterToken: string, value: 1 | -1): Promise<void> {
     const sanitized = voterToken.trim().slice(0, 64);
     if (!sanitized) throw new Error('Voter token required');
+    if (value !== 1 && value !== -1) throw new Error('Vote value must be 1 or -1');
 
     const state = await this.ensureState();
     if (!state) throw new Error('Session not found');
@@ -153,21 +162,80 @@ export class SessionDO implements DurableObject {
     const q = state.questions.find(q => q.id === questionId);
     if (!q) throw new Error('Question not found');
 
-    // Deduplicate: check pending writes for this upvote
-    // (In-memory dedup is best-effort; D1 UNIQUE index is the real guard)
-    this.enqueueWrite(
-      'INSERT OR IGNORE INTO upvotes (voter_token, question_id) VALUES (?, ?)',
-      [sanitized, questionId]
-    );
+    const key = `${questionId}:${sanitized}`;
+    const previous = this.votes.get(key);
 
-    // Optimistically increment in-memory count
-    q.upvoteCount += 1;
+    if (previous === value) {
+      this.votes.delete(key);
+      this.enqueueWrite(
+        'DELETE FROM upvotes WHERE voter_token = ? AND question_id = ?',
+        [sanitized, questionId]
+      );
+      if (value === 1) q.upvoteCount = Math.max(0, q.upvoteCount - 1);
+      else q.downvoteCount = Math.max(0, q.downvoteCount - 1);
+    } else {
+      this.votes.set(key, value);
+      if (previous === undefined) {
+        this.enqueueWrite(
+          'INSERT INTO upvotes (voter_token, question_id, value) VALUES (?, ?, ?)',
+          [sanitized, questionId, value]
+        );
+      } else {
+        this.enqueueWrite(
+          'UPDATE upvotes SET value = ? WHERE voter_token = ? AND question_id = ?',
+          [value, sanitized, questionId]
+        );
+        if (previous === 1) q.upvoteCount = Math.max(0, q.upvoteCount - 1);
+        else q.downvoteCount = Math.max(0, q.downvoteCount - 1);
+      }
+      if (value === 1) q.upvoteCount += 1;
+      else q.downvoteCount += 1;
+    }
+
+    q.score = q.upvoteCount - q.downvoteCount;
     this.broadcastCached();
   }
 
-  private async handleCreateQuestion(text: string, authorName?: string): Promise<void> {
-    const trimmed = text.trim().slice(0, 2000);
-    if (!trimmed) throw new Error('Question text required');
+  private async handleReact(questionId: number, voterToken: string, emoji: string): Promise<void> {
+    const sanitized = voterToken.trim().slice(0, 64);
+    if (!sanitized) throw new Error('Voter token required');
+    if (!isQuestionReactionId(emoji)) throw new Error('Invalid reaction');
+
+    const state = await this.ensureState();
+    if (!state) throw new Error('Session not found');
+
+    const q = state.questions.find(q => q.id === questionId);
+    if (!q) throw new Error('Question not found');
+
+    const key = `${questionId}:${sanitized}:${emoji}`;
+    const existing = q.reactions.find(reaction => reaction.emoji === emoji);
+    if (this.reactionKeys.has(key)) {
+      this.reactionKeys.delete(key);
+      this.enqueueWrite(
+        'DELETE FROM question_reactions WHERE voter_token = ? AND question_id = ? AND emoji = ?',
+        [sanitized, questionId, emoji]
+      );
+      if (existing && existing.count <= 1) {
+        q.reactions = q.reactions.filter(reaction => reaction.emoji !== emoji);
+      } else if (existing) {
+        existing.count -= 1;
+      }
+    } else {
+      this.reactionKeys.add(key);
+      this.enqueueWrite(
+        'INSERT INTO question_reactions (voter_token, question_id, emoji) VALUES (?, ?, ?)',
+        [sanitized, questionId, emoji]
+      );
+      if (existing) existing.count += 1;
+      else q.reactions = [...q.reactions, { emoji, count: 1 }];
+    }
+
+    this.broadcastCached();
+  }
+
+  private async handleCreateQuestion(title: string, text?: string, authorName?: string): Promise<void> {
+    const validatedTitle = validateQuestionTitle(title || '');
+    const trimmed = text?.trim().slice(0, 2000) || '';
 
     const state = await this.ensureState();
     if (!state) throw new Error('Session not found');
@@ -178,15 +246,16 @@ export class SessionDO implements DurableObject {
 
     // Write to D1 immediately for this one — we need the auto-increment ID
     const result = await this.env.DB.prepare(
-      'INSERT INTO questions (text, author_name, is_approved, session_id) VALUES (?, ?, ?, ?) RETURNING id'
-    ).bind(trimmed, name, isApproved ? 1 : 0, state.id).first<{ id: number }>();
+      'INSERT INTO questions (title, text, author_name, is_approved, session_id) VALUES (?, ?, ?, ?, ?) RETURNING id'
+    ).bind(validatedTitle, trimmed, name, isApproved ? 1 : 0, state.id).first<{ id: number }>();
 
     if (!result) throw new Error('Failed to create question');
 
     const newQuestion: QuestionState = {
-      id: result.id, text: trimmed, authorName: name,
+      id: result.id, title: validatedTitle, text: trimmed, authorName: name,
       isApproved, isHighlighted: false, isAnswered: false,
-      upvoteCount: 0, replies: [], createdAt: now,
+      upvoteCount: 0, downvoteCount: 0, score: 0, reactions: [],
+      replies: [], createdAt: now,
     };
 
     // Prepend to in-memory state (newest first)
@@ -318,12 +387,17 @@ export class SessionDO implements DurableObject {
 
     const session = await this.env.DB.prepare(`
       SELECT s.id, s.code, s.title, s.is_moderated, s.passcode_hash, s.primary_color, s.logo_url,
+             s.polls_enabled, s.quizzes_enabled, s.replies_enabled, s.surveys_enabled, s.votes_enabled, s.saturday_banner_enabled,
+             s.reactions_enabled,
              u.id as owner_uid, u.display_name as owner_name
       FROM sessions s LEFT JOIN users u ON s.owner_id = u.id
       WHERE s.code = ?
     `).bind(this.sessionCode).first<{
       id: number; code: string; title: string; is_moderated: number; passcode_hash: string | null;
       primary_color: string | null; logo_url: string | null;
+      polls_enabled: number; quizzes_enabled: number; replies_enabled: number;
+      surveys_enabled: number; votes_enabled: number; saturday_banner_enabled: number;
+      reactions_enabled: number;
       owner_uid: number | null; owner_name: string | null;
     }>();
 
@@ -342,6 +416,13 @@ export class SessionDO implements DurableObject {
       title: session.title,
       isModerated: !!session.is_moderated,
       isPasswordProtected: !!session.passcode_hash,
+      pollsEnabled: !!session.polls_enabled,
+      quizzesEnabled: !!session.quizzes_enabled,
+      repliesEnabled: !!session.replies_enabled,
+      surveysEnabled: !!session.surveys_enabled,
+      votesEnabled: !!session.votes_enabled,
+      saturdayBannerEnabled: !!session.saturday_banner_enabled,
+      reactionsEnabled: !!session.reactions_enabled,
       primaryColor: session.primary_color,
       logoUrl: session.logo_url,
       owner: session.owner_uid ? { id: session.owner_uid, displayName: session.owner_name! } : null,
@@ -352,20 +433,26 @@ export class SessionDO implements DurableObject {
   }
 
   private async loadQuestions(sessionId: number, isModerated: boolean): Promise<QuestionState[]> {
+    this.votes.clear();
+    this.reactionKeys.clear();
     const filter = isModerated ? 'AND q.is_approved = 1' : '';
     const rows = await this.env.DB.prepare(`
-      SELECT q.id, q.text, q.author_name, q.is_approved, q.is_highlighted, q.is_answered, q.created_at,
-             COUNT(up.id) as upvote_count
+      SELECT q.id, q.title, q.text, q.author_name, q.is_approved, q.is_highlighted, q.is_answered, q.created_at,
+             COALESCE(SUM(CASE WHEN up.value = 1 THEN 1 ELSE 0 END), 0) as upvote_count,
+             COALESCE(SUM(CASE WHEN up.value = -1 THEN 1 ELSE 0 END), 0) as downvote_count,
+             COALESCE(SUM(CASE WHEN up.value = 1 THEN 1 WHEN up.value = -1 THEN -1 ELSE 0 END), 0) as score
       FROM questions q LEFT JOIN upvotes up ON up.question_id = q.id
       WHERE q.session_id = ? ${filter}
       GROUP BY q.id ORDER BY q.created_at DESC
     `).bind(sessionId).all<{
-      id: number; text: string; author_name: string | null; is_approved: number;
-      is_highlighted: number; is_answered: number; created_at: string; upvote_count: number;
+      id: number; title: string; text: string; author_name: string | null; is_approved: number;
+      is_highlighted: number; is_answered: number; created_at: string;
+      upvote_count: number; downvote_count: number; score: number;
     }>();
 
     const questionIds = rows.results.map(r => r.id);
     const repliesMap = new Map<number, { id: number; text: string; authorName: string; createdAt: string }[]>();
+    const reactionsMap = new Map<number, { emoji: string; count: number }[]>();
 
     if (questionIds.length > 0) {
       const placeholders = questionIds.map(() => '?').join(',');
@@ -382,12 +469,56 @@ export class SessionDO implements DurableObject {
           id: r.id, text: r.text, authorName: r.author_name, createdAt: r.created_at,
         });
       }
+
+      const [voteRows, reactionRows, reactionVoterRows] = await Promise.all([
+        this.env.DB.prepare(`
+          SELECT voter_token, question_id, value
+          FROM upvotes WHERE question_id IN (${placeholders})
+        `).bind(...questionIds).all<{
+          voter_token: string; question_id: number; value: number;
+        }>(),
+        this.env.DB.prepare(`
+          SELECT question_id, emoji, COUNT(*) as count
+          FROM question_reactions WHERE question_id IN (${placeholders})
+          GROUP BY question_id, emoji ORDER BY question_id, emoji
+        `).bind(...questionIds).all<{
+          question_id: number; emoji: string; count: number;
+        }>(),
+        this.env.DB.prepare(`
+          SELECT voter_token, question_id, emoji
+          FROM question_reactions WHERE question_id IN (${placeholders})
+        `).bind(...questionIds).all<{
+          voter_token: string; question_id: number; emoji: string;
+        }>(),
+      ]);
+
+      for (const vote of voteRows.results) {
+        this.votes.set(
+          `${vote.question_id}:${vote.voter_token}`,
+          Number(vote.value) === -1 ? -1 : 1,
+        );
+      }
+
+      for (const reaction of reactionVoterRows.results) {
+        this.reactionKeys.add(`${reaction.question_id}:${reaction.voter_token}:${reaction.emoji}`);
+      }
+
+      for (const reaction of reactionRows.results) {
+        if (!reactionsMap.has(reaction.question_id)) reactionsMap.set(reaction.question_id, []);
+        reactionsMap.get(reaction.question_id)!.push({
+          emoji: reaction.emoji,
+          count: Number(reaction.count),
+        });
+      }
+
     }
 
     return rows.results.map(q => ({
-      id: q.id, text: q.text, authorName: q.author_name,
+      id: q.id, title: q.title, text: q.text, authorName: q.author_name,
       isApproved: !!q.is_approved, isHighlighted: !!q.is_highlighted,
-      isAnswered: !!q.is_answered, upvoteCount: q.upvote_count,
+      isAnswered: !!q.is_answered, upvoteCount: Number(q.upvote_count),
+      downvoteCount: Number(q.downvote_count), score: Number(q.score),
+      reactions: reactionsMap.get(q.id) || [],
       replies: repliesMap.get(q.id) || [], createdAt: q.created_at,
     }));
   }
