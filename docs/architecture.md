@@ -1,25 +1,26 @@
 # Architecture Deep Dive
 
-Real-Time Slido Clone — Next.js + GraphQL Yoga + Drizzle ORM + Cloudflare D1
+Real-Time Slido Clone — Next.js + GraphQL Yoga + Durable Objects + Cloudflare D1
 
 ---
 
 ## System Overview
 
-The app is a real-time audience interaction platform: Q&A with upvoting, live polls (5 types), timed quizzes with leaderboards, and multi-question surveys. It runs as a single Cloudflare Pages deployment with no separate backend or WebSocket server.
+The app is a real-time audience interaction platform: Q&A with upvoting, live polls (5 types), timed quizzes with leaderboards, and multi-question surveys. It runs as a single Cloudflare Worker with Durable Objects for real-time WebSocket communication and D1 for persistence.
 
 | Layer | Technology | Role |
 |-------|-----------|------|
 | Framework | Next.js 16 (App Router) | SSR/CSR, routing, API route handler |
-| API | GraphQL Yoga | Schema-first GraphQL at `/api/graphql` |
-| Client | Apollo Client 4 | Query/mutation hooks with 3s poll interval |
+| Real-time | Durable Objects (SessionDO) | Per-session WebSocket hub with in-memory state |
+| API | GraphQL Yoga | Schema-first GraphQL at `/api/graphql` (host-only ops) |
+| Client | Apollo Client 4 + WebSocket | WS primary, Apollo polling fallback |
 | ORM | Drizzle ORM | Type-safe schema, relational queries, migrations |
 | Database | Cloudflare D1 (SQLite) | Edge-located, zero-config SQL |
 | Auth | JWT (jsonwebtoken) | Stateless 7-day tokens, SHA-256 passwords |
 | Deploy | @opennextjs/cloudflare | Adapts Next.js to Cloudflare Workers |
 | Styling | Tailwind CSS 4 | Utility-first with CSS custom properties |
 
-**Current real-time strategy:** The app uses Apollo Client polling (3-second interval) instead of WebSocket subscriptions. Every connected client re-fetches the full session query on a timer. This works for small audiences but does not scale — see [Durable Objects Migration](#migration-to-durable-objects--real-time) for the path forward.
+**Real-time strategy:** The app uses a **Durable Object per session** to hold WebSocket connections and broadcast state changes instantly. High-frequency audience actions (upvotes, poll responses, new questions) are applied to in-memory state and broadcast within microseconds, with D1 writes batched via alarm-based write-behind (1s debounce). Apollo polling (3s) is the automatic fallback when WebSocket is unavailable.
 
 ---
 
@@ -200,98 +201,105 @@ On each request, Yoga's context factory calls `getDbFromContext()` to resolve th
 | PollResponse | rankingOrder | `JSON.parse()` of the stored string |
 | Survey | responseCount | `COUNT(*)` from survey_responses per survey |
 
-> **N+1 pattern:** The `upvoteCount` and `voteCount` field resolvers execute a COUNT query per item. For a session with 50 questions, the session query triggers ~50 additional COUNT queries. Acceptable at current scale but would benefit from a DataLoader or pre-aggregation at growth.
+> **N+1 optimization:** The session query eager-loads upvotes and poll responses in the initial Drizzle `findFirst`, computing `upvoteCount`, `responseCount`, and `voteCount` in-memory. Field resolvers accept pre-computed `_upvoteCount` / `_voteCount` values when present, falling back to individual COUNT queries only when a question or option is fetched outside a session context.
 
 ---
 
 ## Request Data Flow
 
-```
-React UI → Apollo Client → Next.js Route → GraphQL Yoga → Drizzle ORM → Cloudflare D1
-```
+The app has two data paths: a **real-time WebSocket path** through Durable Objects (primary) and a **GraphQL HTTP path** (fallback + host-only operations).
 
-### Example: submitting a question
+### Real-Time Path (WebSocket via Durable Object)
+
+```
+Browser (WebSocket) → Worker (intercepts upgrade) → SessionDO → In-Memory State → Broadcast
+                                                          ↓ (write-behind)
+                                                         D1
+```
 
 | Step | Layer | What happens |
 |------|-------|-------------|
-| 1 | React component | User types question, clicks Ask. Component calls `createQuestion` via `useMutation`. |
-| 2 | Apollo Client | Serializes the GQL operation as POST to `/api/graphql`. HttpLink uses relative URL. |
-| 3 | Next.js Route Handler | The POST export in `route.ts` passes the Request to Yoga's `handle()`. |
-| 4 | GraphQL Yoga | Parses the operation, resolves context (`getDbFromContext`), dispatches to resolver. |
-| 5 | Resolver logic | Validates input (trim, length limits), checks session exists, checks moderation, inserts. |
-| 6 | Drizzle ORM | Translates `.insert().values().returning()` into parameterized `INSERT ... RETURNING`. |
-| 7 | Cloudflare D1 | Executes SQL against edge SQLite. Returns inserted row. |
-| 8 | Response path | Row flows back through Drizzle → resolver → Yoga → Next.js → Apollo. `onCompleted` triggers refetch. |
+| 1 | React component | Session page opens. `useSessionSocket` hook connects via WebSocket to `wss://host/?code=SLIDODEV`. |
+| 2 | Worker fetch handler | Detects `Upgrade: websocket` header, resolves the DO by `env.SESSION_DO.idFromName(code)`, forwards request. |
+| 3 | SessionDO.fetch | Creates WebSocket pair via `new WebSocketPair()`, calls `ctx.acceptWebSocket(server)` (Hibernation API). |
+| 4 | SessionDO | Loads full session state from D1 (first access only — cached thereafter). Sends `{ type: 'state', data: {...} }` to the new client. |
+| 5 | User action | Client sends `{ type: 'upvote', questionId: 42, voterToken: '...' }` over WebSocket. |
+| 6 | SessionDO.webSocketMessage | Applies mutation to in-memory `cachedState` instantly (e.g. `q.upvoteCount += 1`). Queues D1 write. |
+| 7 | Broadcast | Serializes cached state and sends to all connected WebSockets via `ctx.getWebSockets()`. |
+| 8 | Write-behind | Alarm fires after 1s debounce. Pending SQL statements are flushed to D1 via `env.DB.batch()`. |
 
-### Polling-Based Updates
+### GraphQL Path (HTTP — fallback + host operations)
 
-The session page uses Apollo's `pollInterval: 3000` — every 3 seconds, every connected client re-fetches the entire `GetSessionDetails` query (all questions with replies, all polls with options, all quizzes, all surveys). The moderation queue polls at 5 seconds.
+```
+React UI → Apollo Client → Next.js Route → GraphQL Yoga → Drizzle ORM → D1
+```
 
-| Metric | Value |
-|--------|-------|
-| Session poll interval | 3 seconds |
-| Moderation poll interval | 5 seconds |
-| Typical response size | ~6KB |
+Used for: auth, session creation/branding, quiz/poll/survey authoring, moderation (approve/reject/highlight/reply), analytics, CSV export. After a GraphQL mutation succeeds, the client sends a `{ type: 'refresh' }` message to the DO, which reloads from D1 and broadcasts to all peers.
 
-> **Scaling ceiling:** With 100 concurrent users, this produces ~33 GraphQL requests/sec. Each query joins across 5+ tables with nested relations. D1's read throughput handles this, but 500+ users would saturate the connection and increase latency.
+### Fallback Behavior
+
+The `useSessionSocket` hook attempts WebSocket connection with exponential backoff (1s → 2s → 4s → ... → 30s). After 5 failed retries, it sets `fallbackToPolling = true`, which re-enables Apollo's `pollInterval: 3000`. A green dot indicator next to the room code shows the connection status (green = live WebSocket, grey = polling fallback).
+
+### WebSocket Protocol
+
+| Direction | Message Type | Payload |
+|-----------|-------------|---------|
+| Client → DO | `subscribe` | `{ type: 'subscribe', code: 'SLIDODEV' }` |
+| Client → DO | `upvote` | `{ type: 'upvote', questionId, voterToken }` |
+| Client → DO | `createQuestion` | `{ type: 'createQuestion', text, authorName? }` |
+| Client → DO | `submitPollResponse` | `{ type: 'submitPollResponse', pollId, voterToken, selectedOptionId?, ... }` |
+| Client → DO | `submitQuizAnswer` | `{ type: 'submitQuizAnswer', quizQuestionId, selectedOptionId, voterToken, answeredInMs }` |
+| Client → DO | `refresh` | `{ type: 'refresh' }` — triggers D1 reload + broadcast |
+| DO → All | `state` | `{ type: 'state', data: SessionState }` — full session snapshot |
+| DO → Client | `error` | `{ type: 'error', message, action? }` |
 
 ---
 
-## Migration to Durable Objects & Real-Time
+## Durable Objects Architecture
 
-Durable Objects (DOs) are Cloudflare's solution for stateful, single-threaded, globally addressable actors. Each DO instance has its own transactional SQLite storage and can hold WebSocket connections — ideal for per-session state coordination.
+### SessionDO (`src/do/SessionDO.ts`)
 
-### Target Architecture
+One Durable Object instance per session code. All clients viewing the same session connect to the same DO instance. The DO is the real-time coordination layer between D1 (persistent truth) and connected browsers.
 
-```
-Browser (WebSocket) → Worker (Router) → Session DO → D1 (Persistence)
-```
+**Key design decisions:**
 
-One Durable Object per session code. All clients for a session (e.g. SLIDODEV) connect to the same DO instance. The DO holds WebSocket connections and broadcasts mutations to all connected peers instantly.
+- **Hibernation API** (`ctx.acceptWebSocket`, `webSocketMessage`, `webSocketClose`): DOs sleep between messages so idle WebSocket connections don't incur billing. On wake, the session code is restored from `ws.deserializeAttachment()` and state is reloaded from D1 if evicted.
 
-### Phase 1: Session Durable Object
+- **In-memory hot path:** Upvotes and poll responses are applied to `cachedState` in-memory and broadcast instantly. No D1 round-trip for the read side of high-frequency mutations.
 
-Create a `SessionDO` class keyed by session code. It accepts WebSocket upgrades via the Hibernation API (`acceptWebSocket` + `webSocketMessage` / `webSocketClose`). On first access, it loads the session from D1 into in-memory state. Subsequent reads are served from memory — no D1 round-trip.
+- **Write-behind batching:** Pending D1 writes are queued as `{ sql, params }` tuples and flushed via the **Alarm API** (the only timer that survives hibernation). The alarm fires after a 1-second debounce. If the flush fails, writes are re-queued for retry on the next alarm.
 
-**wrangler.toml changes:** Add a `[[durable_objects.bindings]]` block pointing to the SessionDO class, plus a `[[migrations]]` block for the DO's SQLite storage.
+- **Last-client flush:** When the last WebSocket disconnects (`webSocketClose` with 0 remaining sockets), pending writes are flushed immediately to avoid data loss before the DO is evicted.
 
-### Phase 2: WebSocket Protocol
+- **Immediate writes for ID-dependent operations:** `createQuestion` and `submitQuizAnswer` write to D1 synchronously because they need auto-increment IDs or `correct_option_id` verification (anti-cheat — correct answers are never sent to clients).
 
-**Client-side:** Replace Apollo polling with a WebSocket connection. On session page load, open a WebSocket to `/api/ws?code=SLIDODEV`. The Worker routes this to the correct DO via `env.SESSION_DO.get(id)`. The DO upgrades the connection and adds it to its connected-clients set.
+### Worker Entry Patching (`scripts/patch-worker.js`)
 
-| Direction | Type | Payload |
-|-----------|------|---------|
-| Client → DO | mutation | `{ action: 'upvote', questionId, voterToken }` |
-| DO → All clients | broadcast | `{ type: 'questionUpdated', question: {...} }` |
-| DO → All clients | broadcast | `{ type: 'pollResponseAdded', pollId, counts: {...} }` |
-| DO → Client | ack | `{ requestId, success: true }` |
-| DO → Client | error | `{ requestId, error: 'Already voted' }` |
+The `@opennextjs/cloudflare` build generates `.open-next/worker.js` as the Worker entry point. A post-build script patches this file to:
 
-### Phase 3: In-Memory State + D1 Write-Behind
+1. Add `export { SessionDO } from "../src/do/SessionDO"` (required for the DO binding).
+2. Wrap the default fetch handler to intercept `Upgrade: websocket` requests and route them to the correct DO instance by session code.
 
-**Hot path (in DO memory):** Upvotes, poll responses, and quiz answers are applied to in-memory session state immediately and broadcast to all WebSocket clients within milliseconds. The DO batches writes to D1 on a 1-second debounced timer — or on `webSocketClose` / alarm.
+The build pipeline is: `npx @opennextjs/cloudflare build` → `node scripts/patch-worker.js` → `wrangler deploy`.
 
-**Cold path (D1 via GraphQL):** Session creation, quiz authoring, survey creation, and analytics remain as GraphQL mutations hitting D1 directly. These are low-frequency, host-only operations that don't need real-time broadcast.
+### Deployment
 
-### Phase 4: Hibernation & Cost Optimization
+Two wrangler configs enable parallel deployment of the stable and preview versions:
 
-Use the Hibernation API so DOs don't bill for idle WebSocket connections. The DO sleeps between messages — Cloudflare wakes it on incoming WebSocket frames. State is evicted from memory during hibernation; on wake, reload from the DO's embedded SQLite or D1. Set an alarm to flush pending writes before hibernation.
+| Config | Worker Name | URL | DO Support |
+|--------|------------|-----|-----------|
+| `wrangler.toml` | `slido-clone` | `slido-clone.*.workers.dev` | Yes |
+| `wrangler.preview.toml` | `slido-clone-preview` | `slido-clone-preview.*.workers.dev` | Yes |
 
-### What Changes in the Codebase
+Both share the same D1 database. Each has its own independent DO namespace. Deploy with `npm run deploy` (production) or `npm run deploy:preview` (preview).
 
-| File / Area | Current | After DOs |
-|------------|---------|-----------|
-| `wrangler.toml` | D1 binding only | + DO binding + DO migration tag |
-| `src/do/SessionDO.ts` | Does not exist | DO class with WS handling |
-| `api/ws/route.ts` | Does not exist | Upgrades to WS, routes to DO |
-| `session/[code]/page.tsx` | Apollo `pollInterval: 3000` | WS connection, dispatch/receive |
-| `api/graphql/route.ts` | All mutations write to D1 | High-freq mutations route through DO |
-| `apollo-client.ts` | HttpLink only | Keep for auth/session-creation; add WS for live data |
+### What Stays on GraphQL
 
-### What Stays the Same
+- Auth (`register`, `login`, `me`)
+- Session creation and branding
+- Poll/quiz/survey authoring (`createPoll`, `addQuizQuestion`, `addSurveyQuestion`, etc.)
+- Host moderation (`approveQuestion`, `rejectQuestion`, `highlightQuestion`, `markAsAnswered`, `replyToQuestion`)
+- Host controls (`activatePoll`, `startQuiz`, `nextQuizQuestion`, `closeSurvey`)
+- Analytics and CSV export
 
-- The Drizzle schema and D1 database remain the source of truth for all persistent data.
-- GraphQL continues to serve session creation, auth, analytics, and CSV export.
-- The React component tree and UI remain unchanged — only the data-fetching hooks change.
-
-> **Estimated effort:** Phase 1–2 (basic DO + WebSocket) can be implemented in a focused sprint. The existing GraphQL resolvers contain all the business logic (validation, scoring, deduplication) that can be extracted into shared functions called by both the DO message handler and the remaining GraphQL mutations.
+After any GraphQL mutation, the client sends `{ type: 'refresh' }` to the DO, which reloads from D1 and broadcasts the updated state to all connected peers.

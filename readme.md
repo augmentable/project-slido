@@ -4,21 +4,22 @@
 
 A full-stack, real-time Q&A and interactive polling application built with **Next.js**, **GraphQL Yoga**, **Drizzle ORM**, and **Cloudflare D1**. Deployable to **Cloudflare Pages** with zero Docker or Postgres dependencies.
 
-Audience members join sessions via room codes, post questions, vote in polls, take quizzes, and complete surveys. Updates sync across all clients via polling.
+Audience members join sessions via room codes, post questions, vote in polls, take quizzes, and complete surveys. Updates sync across all clients in real time via **WebSocket connections** through Cloudflare Durable Objects, with automatic Apollo polling fallback.
 
 ---
 
 ## Tech Stack
 
 - **Framework:** Next.js (App Router, React 19)
+- **Real-time:** Cloudflare Durable Objects (per-session WebSocket hub)
 - **API:** GraphQL Yoga (served from Next.js Route Handler at `/api/graphql`)
 - **ORM:** Drizzle ORM
 - **Database:** Cloudflare D1 (SQLite) / better-sqlite3 for local dev
 - **Styling:** Tailwind CSS 4
-- **GraphQL Client:** Apollo Client
+- **GraphQL Client:** Apollo Client (fallback + host operations)
 - **Charts:** Recharts
 - **Auth:** JWT (jsonwebtoken)
-- **Deploy:** Cloudflare Pages via @opennextjs/cloudflare
+- **Deploy:** Cloudflare Workers via @opennextjs/cloudflare
 
 ---
 
@@ -32,19 +33,28 @@ web/
 │   │   ├── api/
 │   │   │   ├── graphql/route.ts         # GraphQL API endpoint
 │   │   │   └── export/[sessionId]/route.ts  # CSV export
+│   │   ├── docs/page.tsx                # Interactive architecture docs
 │   │   └── session/[code]/
 │   │       ├── page.tsx                 # Live session (Q&A, Polls, Quiz, Survey)
 │   │       ├── analytics/page.tsx       # Analytics dashboard
 │   │       └── present/page.tsx         # Presenter / display mode
 │   ├── components/                      # React components
+│   ├── do/
+│   │   └── SessionDO.ts                # Durable Object — per-session WebSocket hub
+│   ├── hooks/
+│   │   └── useSessionSocket.ts          # React hook for WS connection + fallback
+│   ├── lib/
+│   │   ├── apollo-client.ts             # Apollo Client setup
+│   │   └── ws-protocol.ts              # Shared WS message types
 │   ├── db/
 │   │   ├── schema.ts                    # Drizzle schema (17 tables)
 │   │   ├── index.ts                     # DB client factory
 │   │   └── seed.ts                      # Demo data seed script
-│   └── lib/
-│       └── apollo-client.ts             # Apollo Client setup
+├── scripts/
+│   └── patch-worker.js                  # Post-build: injects DO export + WS routing
 ├── drizzle/                             # Generated SQL migrations
-├── wrangler.toml                        # Cloudflare config
+├── wrangler.toml                        # Cloudflare config (production)
+├── wrangler.preview.toml                # Cloudflare config (preview branch)
 ├── drizzle.config.ts                    # Drizzle Kit config
 └── package.json
 ```
@@ -89,7 +99,7 @@ Demo host account: `host@slido.dev` / `password123`
 
 ---
 
-## Deploy to Cloudflare Pages
+## Deploy to Cloudflare Workers
 
 ### 1. Create D1 Database
 
@@ -108,8 +118,14 @@ npm run db:migrate:prod
 ### 3. Deploy
 
 ```bash
+# Production
 npm run deploy
+
+# Preview (separate worker, same D1 database)
+npm run deploy:preview
 ```
+
+The build pipeline runs `@opennextjs/cloudflare build` then patches the generated worker to export the `SessionDO` class and intercept WebSocket upgrades.
 
 ---
 
@@ -134,10 +150,12 @@ npm run deploy
 |--------|-------------|
 | `npm run dev` | Start Next.js dev server |
 | `npm run build` | Build for production |
-| `npm run build:cf` | Build for Cloudflare Pages |
+| `npm run build:cf` | Build for Cloudflare Workers (+ patch worker for DO) |
 | `npm run preview` | Preview with Wrangler locally |
-| `npm run deploy` | Build and deploy to Cloudflare |
+| `npm run deploy` | Build and deploy to Cloudflare (production) |
+| `npm run deploy:preview` | Build and deploy preview worker |
 | `npm run db:generate` | Generate new Drizzle migration |
 | `npm run db:migrate` | Apply migrations locally |
 | `npm run db:migrate:prod` | Apply migrations to production D1 |
 | `npm run db:seed` | Seed local DB with demo data |
+| `npm run db:seed:prod` | Seed production D1 via wrangler |
