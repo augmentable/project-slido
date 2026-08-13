@@ -16,9 +16,12 @@ Audience members join sessions via room codes, post questions, vote in polls, ta
 - **ORM:** Drizzle ORM
 - **Database:** Cloudflare D1 (SQLite) / better-sqlite3 for local dev
 - **Styling:** Tailwind CSS 4
+- **Theming:** 3 switchable themes via CSS custom properties (Night Owl / Paper / Electric)
+- **Typography:** Satoshi + Cabinet Grotesk (Fontshare)
 - **GraphQL Client:** Apollo Client (fallback + host operations)
 - **Charts:** Recharts
 - **Auth:** JWT (jsonwebtoken)
+- **Testing:** Vitest + @cloudflare/vitest-pool-workers
 - **Deploy:** Cloudflare Workers via @opennextjs/cloudflare
 
 ---
@@ -29,6 +32,8 @@ Audience members join sessions via room codes, post questions, vote in polls, ta
 web/
 ├── src/
 │   ├── app/
+│   │   ├── globals.css                  # Theme CSS variables + animations
+│   │   ├── layout.tsx                   # Root layout (ThemeProvider, fonts)
 │   │   ├── page.tsx                     # Home (Join / Create / Login)
 │   │   ├── api/
 │   │   │   ├── graphql/route.ts         # GraphQL API endpoint
@@ -38,24 +43,35 @@ web/
 │   │       ├── page.tsx                 # Live session (Q&A, Polls, Quiz, Survey)
 │   │       ├── analytics/page.tsx       # Analytics dashboard
 │   │       └── present/page.tsx         # Presenter / display mode
-│   ├── components/                      # React components
+│   ├── components/
+│   │   ├── ApolloWrapper.tsx            # Apollo Client provider
+│   │   ├── ThemeProvider.tsx            # React context for theme switching
+│   │   ├── ThemePicker.tsx              # Swatch-based theme selector
+│   │   ├── polls/                       # PollCard, PollCreator
+│   │   ├── quiz/                        # QuizPlayer, QuizCreator
+│   │   └── survey/                      # SurveyCard, SurveyCreator
 │   ├── do/
 │   │   └── SessionDO.ts                # Durable Object — per-session WebSocket hub
 │   ├── hooks/
 │   │   └── useSessionSocket.ts          # React hook for WS connection + fallback
 │   ├── lib/
 │   │   ├── apollo-client.ts             # Apollo Client setup
+│   │   ├── themes.ts                    # Theme definitions + localStorage helpers
 │   │   └── ws-protocol.ts              # Shared WS message types
 │   ├── db/
 │   │   ├── schema.ts                    # Drizzle schema (17 tables)
 │   │   ├── index.ts                     # DB client factory
-│   │   └── seed.ts                      # Demo data seed script
+│   │   ├── seed.ts                      # Demo data seed (local)
+│   │   └── seed-remote.ts              # Production seed via wrangler
 ├── scripts/
 │   └── patch-worker.js                  # Post-build: injects DO export + WS routing
 ├── drizzle/                             # Generated SQL migrations
+├── open-next.config.ts                  # @opennextjs/cloudflare adapter config
+├── worker-configuration.d.ts            # CloudflareEnv type declarations
 ├── wrangler.toml                        # Cloudflare config (production)
 ├── wrangler.preview.toml                # Cloudflare config (preview branch)
 ├── drizzle.config.ts                    # Drizzle Kit config
+├── tsconfig.json                        # TypeScript config (workers-types + node)
 └── package.json
 ```
 
@@ -107,7 +123,14 @@ Demo host account: `host@slido.dev` / `password123`
 npx wrangler d1 create slido-db
 ```
 
-Update `wrangler.toml` with the returned `database_id`.
+Update `wrangler.toml` with the returned `database_id`. Ensure these settings are present:
+
+```toml
+compatibility_flags = ["nodejs_compat"]   # Required for Node built-ins
+main = ".open-next/worker.js"             # OpenNext build output
+[assets]
+directory = ".open-next/assets"
+```
 
 ### 2. Apply Migrations
 
@@ -137,6 +160,7 @@ The build pipeline runs `@opennextjs/cloudflare build` then patches the generate
 - **Surveys** — Multi-question forms with multiple choice, rating, and open text
 - **Analytics Dashboard** with engagement charts and CSV export
 - **Presenter Mode** — Full-screen display for projecting live results
+- **3 Switchable Themes** — Night Owl (dark), Paper (light editorial), Electric (neon charcoal)
 - **User Authentication** — Email/password with JWT
 - **Session Ownership** — Sessions linked to authenticated users
 - **Custom Branding** — Primary color and logo per session
@@ -159,3 +183,5 @@ The build pipeline runs `@opennextjs/cloudflare build` then patches the generate
 | `npm run db:migrate:prod` | Apply migrations to production D1 |
 | `npm run db:seed` | Seed local DB with demo data |
 | `npm run db:seed:prod` | Seed production D1 via wrangler |
+| `npm run test` | Run tests (Vitest) |
+| `npm run test:watch` | Run tests in watch mode |

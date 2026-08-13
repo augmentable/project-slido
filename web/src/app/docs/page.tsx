@@ -17,7 +17,7 @@ export default function DocsPage() {
     { key: 'orm', label: 'ORM & DB' },
     { key: 'graphql', label: 'GraphQL' },
     { key: 'flow', label: 'Data Flow' },
-    { key: 'realtime', label: 'Durable Objects' },
+    { key: 'realtime', label: 'Real-Time' },
   ];
 
   return (
@@ -184,8 +184,8 @@ function OverviewSection() {
         <SectionTitle>System Overview</SectionTitle>
         <Prose>
           The app is a real-time audience interaction platform — Q&A with upvoting, live polls (5 types),
-          timed quizzes with leaderboards, and multi-question surveys. It runs as a single Cloudflare Pages
-          deployment with no separate backend or WebSocket server.
+          timed quizzes with leaderboards, and multi-question surveys. It runs as a Cloudflare Worker with
+          Durable Objects for real-time WebSocket communication and D1 for persistence.
         </Prose>
         <StatGrid stats={[
           { value: '17', label: 'Database tables' },
@@ -201,19 +201,22 @@ function OverviewSection() {
           headers={['Layer', 'Technology', 'Role']}
           rows={[
             ['Framework', 'Next.js 16 (App Router)', 'SSR/CSR, routing, API route handler'],
-            ['API', 'GraphQL Yoga', 'Schema-first GraphQL at /api/graphql'],
-            ['Client', 'Apollo Client 4', 'Query/mutation hooks with 3s poll interval'],
+            ['Real-time', 'Durable Objects (SessionDO)', 'Per-session WebSocket hub with in-memory state'],
+            ['API', 'GraphQL Yoga', 'Schema-first GraphQL at /api/graphql (host ops)'],
+            ['Client', 'Apollo Client 4 + WebSocket', 'WS primary, Apollo 3s polling fallback'],
             ['ORM', 'Drizzle ORM', 'Type-safe schema, relational queries, migrations'],
             ['Database', 'Cloudflare D1 (SQLite)', 'Edge-located, zero-config SQL'],
             ['Auth', 'JWT (jsonwebtoken)', 'Stateless 7-day tokens, SHA-256 passwords'],
             ['Deploy', '@opennextjs/cloudflare', 'Adapts Next.js to Cloudflare Workers'],
             ['Styling', 'Tailwind CSS 4', 'Utility-first with CSS custom properties'],
+            ['Theming', 'CSS variables + React context', '3 switchable themes (Night Owl, Paper, Electric)'],
+            ['Typography', 'Satoshi + Cabinet Grotesk', 'Loaded via Fontshare CDN'],
           ]}
         />
       </DocCard>
 
-      <InfoBox title="Current real-time strategy">
-        Apollo Client polling at 3-second intervals. Every client re-fetches the full session query on a timer. Works for small audiences but doesn&apos;t scale — see the Durable Objects section for the migration path.
+      <InfoBox title="Real-time strategy">
+        WebSocket via Durable Objects is the primary real-time path. One DO per session holds all connected clients and broadcasts state changes within microseconds. Apollo Client polling (3s interval) is the automatic fallback when WebSocket is unavailable — see the Real-Time section for details.
       </InfoBox>
     </div>
   );
@@ -426,42 +429,53 @@ function FlowSection() {
     <div className="space-y-6 animate-fade-in">
       <DocCard>
         <SectionTitle>Request Data Flow</SectionTitle>
-        <FlowDiagram steps={['React UI', 'Apollo Client', 'Next.js Route', 'GraphQL Yoga', 'Drizzle ORM', 'Cloudflare D1']} />
+        <Prose>
+          The app has two data paths: a <strong style={{ color: 'var(--success)' }}>real-time WebSocket path</strong> through
+          Durable Objects (primary) and a <strong style={{ color: 'var(--accent)' }}>GraphQL HTTP path</strong> (fallback + host-only operations).
+        </Prose>
       </DocCard>
 
       <DocCard>
-        <SubTitle>Example: Submitting a Question</SubTitle>
+        <SubTitle>Real-Time Path (WebSocket via Durable Object)</SubTitle>
+        <FlowDiagram steps={['Browser (WS)', 'Worker (Router)', 'SessionDO', 'Broadcast']} color="var(--success)" />
         <DataTable
           headers={['Step', 'Layer', 'What happens']}
           rows={[
-            ['1', 'React component', 'User types question, clicks Ask. Calls createQuestion via useMutation.'],
-            ['2', 'Apollo Client', 'Serializes GQL as POST to /api/graphql. HttpLink uses relative URL.'],
-            ['3', 'Next.js Route', 'POST export passes Request to Yoga\'s handle() method.'],
-            ['4', 'GraphQL Yoga', 'Parses operation, resolves DB context, dispatches to resolver.'],
-            ['5', 'Resolver', 'Validates input (trim, length), checks session, checks moderation, inserts.'],
-            ['6', 'Drizzle ORM', 'Translates .insert().values().returning() into INSERT ... RETURNING SQL.'],
-            ['7', 'Cloudflare D1', 'Executes SQL against edge SQLite. Returns inserted row.'],
-            ['8', 'Response', 'Row flows back up the stack. onCompleted triggers refetch.'],
+            ['1', 'React hook', 'Session page opens. useSessionSocket connects via WS to /?code=SLIDODEV.'],
+            ['2', 'Worker fetch', 'Detects Upgrade: websocket header, routes to DO via env.SESSION_DO.get(id).'],
+            ['3', 'SessionDO.fetch', 'Creates WebSocketPair, calls ctx.acceptWebSocket (Hibernation API).'],
+            ['4', 'SessionDO', 'Loads full state from D1 (first access — cached thereafter). Sends initial state.'],
+            ['5', 'User action', 'Client sends { type: "upvote", questionId, voterToken } over WebSocket.'],
+            ['6', 'DO handler', 'Applies mutation to cachedState instantly. Queues D1 write.'],
+            ['7', 'Broadcast', 'Sends updated state to all connected clients via ctx.getWebSockets().'],
+            ['8', 'Write-behind', 'Alarm fires after 1s debounce. Pending writes flushed to D1.'],
           ]}
         />
       </DocCard>
 
       <DocCard>
-        <SubTitle>Polling-Based Updates</SubTitle>
+        <SubTitle>GraphQL Path (HTTP — fallback + host operations)</SubTitle>
+        <FlowDiagram steps={['React UI', 'Apollo Client', 'Next.js Route', 'GraphQL Yoga', 'Drizzle ORM', 'D1']} />
         <Prose>
-          The session page uses Apollo&apos;s <Mono>pollInterval: 3000</Mono> — every 3 seconds, every connected
-          client re-fetches the entire GetSessionDetails query (all questions, polls, quizzes, surveys).
+          Used for: auth, session creation/branding, quiz/poll/survey authoring, moderation, analytics, CSV export.
+          After a GraphQL mutation, the client sends a <Mono>{'{ type: "refresh" }'}</Mono> message to the DO,
+          which reloads from D1 and broadcasts to all peers.
         </Prose>
-        <StatGrid stats={[
-          { value: '3s', label: 'Session poll interval' },
-          { value: '5s', label: 'Moderation poll interval' },
-          { value: '~6KB', label: 'Typical response size' },
-        ]} />
       </DocCard>
 
-      <WarnBox title="Scaling ceiling">
-        100 concurrent users = ~33 GraphQL requests/sec, each joining 5+ tables. D1 handles this, but 500+ users would saturate the connection and increase latency noticeably.
-      </WarnBox>
+      <DocCard>
+        <SubTitle>Fallback Behavior</SubTitle>
+        <Prose>
+          The <Mono>useSessionSocket</Mono> hook attempts WebSocket with exponential backoff (1s → 2s → 4s → ... → 30s).
+          After 5 failed retries, it sets <Mono>fallbackToPolling = true</Mono>, which re-enables Apollo&apos;s <Mono>pollInterval: 3000</Mono>.
+        </Prose>
+        <StatGrid stats={[
+          { value: '~μs', label: 'WS broadcast latency' },
+          { value: '3s', label: 'Polling fallback interval' },
+          { value: '5', label: 'Max WS retries' },
+          { value: '30s', label: 'Max backoff' },
+        ]} />
+      </DocCard>
     </div>
   );
 }
@@ -470,94 +484,78 @@ function RealtimeSection() {
   return (
     <div className="space-y-6 animate-fade-in">
       <DocCard>
-        <SectionTitle>Migration to Durable Objects & Real-Time</SectionTitle>
+        <SectionTitle>Durable Objects Architecture</SectionTitle>
         <Prose>
-          Durable Objects (DOs) are Cloudflare&apos;s solution for stateful, single-threaded, globally
-          addressable actors. Each DO instance has its own transactional SQLite storage and can hold
-          WebSocket connections — ideal for per-session state coordination.
+          One Durable Object (<Mono>SessionDO</Mono>) per session code. All clients viewing the same session connect to the same
+          DO instance. The DO is the real-time coordination layer between D1 (persistent truth) and connected browsers.
         </Prose>
-        <FlowDiagram steps={['Browser (WS)', 'Worker (Router)', 'Session DO', 'D1 (Persistence)']} color="var(--success)" />
-        <Prose>
-          One Durable Object per session code. All clients for a session connect to the same DO.
-          The DO holds WebSocket connections and broadcasts mutations instantly.
-        </Prose>
+        <FlowDiagram steps={['Browser (WS)', 'Worker (Router)', 'SessionDO', 'In-Memory State', 'Broadcast']} color="var(--success)" />
       </DocCard>
 
       <DocCard>
-        <SubTitle>Phase 1: Session Durable Object</SubTitle>
-        <Prose>
-          Create a <Mono>SessionDO</Mono> class keyed by session code. It accepts WebSocket upgrades via the
-          Hibernation API. On first access, it loads the session from D1 into memory. Subsequent reads are
-          served from memory — no D1 round-trip.
-        </Prose>
-        <Prose>
-          <strong style={{ color: 'var(--text-strong)' }}>wrangler.toml:</strong> Add a <Mono>[[durable_objects.bindings]]</Mono> block
-          and a <Mono>[[migrations]]</Mono> block for the DO&apos;s embedded SQLite storage.
-        </Prose>
-      </DocCard>
-
-      <DocCard>
-        <SubTitle>Phase 2: WebSocket Protocol</SubTitle>
-        <Prose>
-          Replace Apollo polling with a WebSocket connection. On session page load, connect to <Mono>/api/ws?code=SLIDODEV</Mono>. The Worker routes to the correct DO via <Mono>env.SESSION_DO.get(id)</Mono>.
-        </Prose>
-        <DataTable
-          headers={['Direction', 'Type', 'Payload']}
-          rows={[
-            ['Client → DO', 'mutation', '{ action: "upvote", questionId, voterToken }'],
-            ['DO → All', 'broadcast', '{ type: "questionUpdated", question: {...} }'],
-            ['DO → All', 'broadcast', '{ type: "pollResponseAdded", pollId, counts }'],
-            ['DO → Client', 'ack', '{ requestId, success: true }'],
-            ['DO → Client', 'error', '{ requestId, error: "Already voted" }'],
-          ]}
-        />
-      </DocCard>
-
-      <DocCard>
-        <SubTitle>Phase 3: In-Memory State + D1 Write-Behind</SubTitle>
-        <Prose>
-          <strong style={{ color: 'var(--text-strong)' }}>Hot path (in DO memory):</strong> Upvotes, poll responses, and quiz answers
-          apply to in-memory state immediately and broadcast within milliseconds. The DO batches D1 writes on a 1-second debounce.
-        </Prose>
-        <Prose>
-          <strong style={{ color: 'var(--text-strong)' }}>Cold path (D1 via GraphQL):</strong> Session creation, quiz authoring, survey creation, and analytics stay as GraphQL mutations hitting D1 directly. Low-frequency, host-only operations.
-        </Prose>
-      </DocCard>
-
-      <DocCard>
-        <SubTitle>Phase 4: Hibernation & Cost Optimization</SubTitle>
-        <Prose>
-          Use the Hibernation API so DOs don&apos;t bill for idle WebSocket connections. The DO sleeps between messages; Cloudflare wakes it on incoming frames. State reloads from embedded SQLite or D1 on wake. An alarm flushes pending writes before hibernation.
-        </Prose>
-      </DocCard>
-
-      <DocCard>
-        <SubTitle>What Changes in the Codebase</SubTitle>
-        <DataTable
-          headers={['File / Area', 'Current', 'After DOs']}
-          rows={[
-            ['wrangler.toml', 'D1 binding only', '+ DO binding + migration tag'],
-            ['src/do/SessionDO.ts', 'Does not exist', 'DO class with WS handling'],
-            ['api/ws/route.ts', 'Does not exist', 'Upgrades to WS, routes to DO'],
-            ['session/[code]/page.tsx', 'Apollo pollInterval: 3000', 'WS connection, dispatch/receive'],
-            ['api/graphql/route.ts', 'All mutations → D1', 'High-freq mutations → DO'],
-            ['apollo-client.ts', 'HttpLink only', 'Keep for auth; add WS for live data'],
-          ]}
-        />
-      </DocCard>
-
-      <DocCard>
-        <SubTitle>What Stays the Same</SubTitle>
-        <div className="space-y-2">
-          <Prose>The Drizzle schema and D1 database remain the source of truth for all persistent data.</Prose>
-          <Prose>GraphQL continues to serve session creation, auth, analytics, and CSV export.</Prose>
-          <Prose>The React component tree and UI remain unchanged — only the data-fetching hooks change.</Prose>
+        <SubTitle>SessionDO Design (src/do/SessionDO.ts)</SubTitle>
+        <div className="space-y-3">
+          <Prose>
+            <strong style={{ color: 'var(--text-strong)' }}>Hibernation API:</strong> Uses <Mono>ctx.acceptWebSocket</Mono>, <Mono>webSocketMessage</Mono>, <Mono>webSocketClose</Mono> so idle WebSocket connections don&apos;t incur billing. On wake, the session code restores from <Mono>ws.deserializeAttachment()</Mono>.
+          </Prose>
+          <Prose>
+            <strong style={{ color: 'var(--text-strong)' }}>In-memory hot path:</strong> Upvotes and poll responses apply to <Mono>cachedState</Mono> in-memory and broadcast instantly. No D1 round-trip for read-side high-frequency mutations.
+          </Prose>
+          <Prose>
+            <strong style={{ color: 'var(--text-strong)' }}>Write-behind batching:</strong> Pending D1 writes queue as <Mono>{'{ sql, params }'}</Mono> tuples and flush via the Alarm API (1s debounce). If the flush fails, writes re-queue for retry.
+          </Prose>
+          <Prose>
+            <strong style={{ color: 'var(--text-strong)' }}>Last-client flush:</strong> When the last WebSocket disconnects, pending writes flush immediately to avoid data loss before DO eviction.
+          </Prose>
+          <Prose>
+            <strong style={{ color: 'var(--text-strong)' }}>Immediate writes:</strong> <Mono>createQuestion</Mono> and <Mono>submitQuizAnswer</Mono> write to D1 synchronously because they need auto-increment IDs or <Mono>correct_option_id</Mono> verification (anti-cheat — correct answers never sent to clients).
+          </Prose>
         </div>
       </DocCard>
 
-      <InfoBox title="Estimated effort">
-        Phase 1–2 (basic DO + WebSocket) can be done in a focused sprint. The existing GraphQL resolvers contain all business logic (validation, scoring, deduplication) that can be extracted into shared functions used by both the DO handler and the remaining GraphQL mutations.
-      </InfoBox>
+      <DocCard>
+        <SubTitle>WebSocket Protocol</SubTitle>
+        <DataTable
+          headers={['Direction', 'Type', 'Payload']}
+          rows={[
+            ['Client → DO', 'subscribe', '{ type: "subscribe", code: "SLIDODEV" }'],
+            ['Client → DO', 'upvote', '{ type: "upvote", questionId, voterToken }'],
+            ['Client → DO', 'createQuestion', '{ type: "createQuestion", text, authorName? }'],
+            ['Client → DO', 'submitPollResponse', '{ type: "submitPollResponse", pollId, voterToken, ... }'],
+            ['Client → DO', 'submitQuizAnswer', '{ type: "submitQuizAnswer", quizQuestionId, selectedOptionId, voterToken, answeredInMs }'],
+            ['Client → DO', 'refresh', '{ type: "refresh" } — triggers D1 reload + broadcast'],
+            ['DO → All', 'state', '{ type: "state", data: SessionState } — full session snapshot'],
+            ['DO → Client', 'error', '{ type: "error", message, action? }'],
+          ]}
+        />
+      </DocCard>
+
+      <DocCard>
+        <SubTitle>Worker Entry Patching</SubTitle>
+        <Prose>
+          The <Mono>@opennextjs/cloudflare</Mono> build generates <Mono>.open-next/worker.js</Mono>. A post-build script (<Mono>scripts/patch-worker.js</Mono>) patches it to:
+          (1) export the <Mono>SessionDO</Mono> class (required for the DO binding) and
+          (2) wrap the default fetch handler to intercept <Mono>Upgrade: websocket</Mono> requests and route them to the correct DO instance by session code.
+        </Prose>
+        <Prose>
+          Build pipeline: <Mono>npx @opennextjs/cloudflare build</Mono> → <Mono>node scripts/patch-worker.js</Mono> → <Mono>wrangler deploy</Mono>
+        </Prose>
+      </DocCard>
+
+      <DocCard>
+        <SubTitle>What Stays on GraphQL</SubTitle>
+        <div className="space-y-2">
+          <Prose>Auth (<Mono>register</Mono>, <Mono>login</Mono>, <Mono>me</Mono>)</Prose>
+          <Prose>Session creation and branding</Prose>
+          <Prose>Poll/quiz/survey authoring (createPoll, addQuizQuestion, addSurveyQuestion, etc.)</Prose>
+          <Prose>Host moderation (approve, reject, highlight, markAsAnswered, reply)</Prose>
+          <Prose>Host controls (activatePoll, startQuiz, nextQuizQuestion, closeSurvey)</Prose>
+          <Prose>Analytics and CSV export</Prose>
+        </div>
+        <InfoBox title="Mutation → broadcast pattern">
+          After any GraphQL mutation, the client sends {'{ type: "refresh" }'} to the DO, which reloads from D1 and broadcasts the updated state to all connected peers.
+        </InfoBox>
+      </DocCard>
     </div>
   );
 }
