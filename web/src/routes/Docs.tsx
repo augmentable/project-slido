@@ -1,12 +1,10 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
-import { ThemePicker } from '@/components/ThemePicker';
-import { useTheme } from '@/components/ThemeProvider';
+import { DisplayControls } from '@/components/DisplayControls';
 
 type Section = 'overview' | 'schema' | 'orm' | 'graphql' | 'flow' | 'realtime';
 
 export default function DocsPage() {
-  const { theme, setTheme } = useTheme();
   const [section, setSection] = useState<Section>('overview');
 
   const sections: { key: Section; label: string }[] = [
@@ -21,7 +19,7 @@ export default function DocsPage() {
   return (
     <main className="min-h-screen p-6 md:p-12 flex justify-center" style={{ background: 'var(--gradient-hero)' }}>
       <div className="max-w-4xl w-full space-y-8">
-        <div className="flex items-start justify-between animate-fade-in">
+        <div className="flex items-start justify-between flex-wrap animate-fade-in">
           <div>
             <Link to="/" className="text-xs font-medium tracking-wider uppercase hover:underline" style={{ color: 'var(--accent)' }}>&larr; Home</Link>
             <h1 className="text-3xl md:text-4xl font-black mt-3" style={{ fontFamily: "'Cabinet Grotesk', sans-serif", color: 'var(--text-strong)' }}>
@@ -31,7 +29,7 @@ export default function DocsPage() {
               Vite + Hono + GraphQL Yoga + Drizzle ORM + Cloudflare D1
             </p>
           </div>
-          <ThemePicker current={theme} onChange={setTheme} />
+          <DisplayControls compact />
         </div>
 
         <div className="flex gap-1.5 p-1.5 rounded-xl flex-wrap" style={{ background: 'var(--bg-raised)' }}>
@@ -177,12 +175,12 @@ function OverviewSection() {
       <DocCard>
         <SectionTitle>System Overview</SectionTitle>
         <Prose>
-          The app is a real-time audience interaction platform — Q&A with upvoting, live polls (5 types),
+          The app is a real-time audience interaction platform — Q&A with voting and reactions, live polls (5 types),
           timed quizzes with leaderboards, and multi-question surveys. It runs as a Cloudflare Worker with
           Durable Objects for real-time WebSocket communication and D1 for persistence.
         </Prose>
         <StatGrid stats={[
-          { value: '17', label: 'Database tables' },
+          { value: '18', label: 'Database tables' },
           { value: '9', label: 'GraphQL queries' },
           { value: '15', label: 'GraphQL mutations' },
           { value: '5', label: 'Poll types' },
@@ -221,8 +219,9 @@ function SchemaSection() {
   const tables = [
     { name: 'users', cols: ['id PK', 'email UNIQUE', 'password_hash', 'display_name', 'created_at'], note: 'Host accounts' },
     { name: 'sessions', cols: ['id PK', 'code UNIQUE', 'title', 'is_moderated', 'passcode_hash?', 'primary_color?', 'logo_url?', 'owner_id FK→users', 'created_at'], note: 'Room code is join key' },
-    { name: 'questions', cols: ['id PK', 'text', 'author_name?', 'is_approved', 'is_highlighted', 'is_answered', 'session_id FK', 'created_at'], note: 'Moderated sessions require approval' },
-    { name: 'upvotes', cols: ['id PK', 'voter_token', 'question_id FK'], note: 'UNIQUE(voter_token, question_id)' },
+    { name: 'questions', cols: ['id PK', 'title', 'text', 'author_name?', 'is_approved', 'is_highlighted', 'is_answered', 'session_id FK', 'created_at'], note: 'Required title is 10 words or fewer; body text is optional' },
+    { name: 'upvotes', cols: ['id PK', 'voter_token', 'question_id FK', 'value'], note: 'UNIQUE(voter_token, question_id); value is 1 or -1; same vote toggles off and opposite vote switches' },
+    { name: 'question_reactions', cols: ['id PK', 'voter_token', 'question_id FK', 'emoji'], note: 'UNIQUE(voter_token, question_id, emoji); each reaction toggles independently' },
     { name: 'replies', cols: ['id PK', 'text', 'author_name', 'question_id FK', 'created_at'], note: 'Threaded replies' },
     { name: 'polls', cols: ['id PK', 'type', 'question', 'is_active', 'allow_multiple', 'session_id FK', 'created_at'], note: '5 types: MC, WC, Rating, Open, Ranking' },
     { name: 'poll_options', cols: ['id PK', 'text', 'position', 'poll_id FK'], note: 'MC and ranking' },
@@ -241,7 +240,7 @@ function SchemaSection() {
   return (
     <div className="space-y-6 animate-fade-in">
       <DocCard>
-        <SectionTitle>Database Schema — 17 Tables</SectionTitle>
+        <SectionTitle>Database Schema — 18 Tables</SectionTitle>
         <Prose>
           All tables use integer auto-increment primary keys. Foreign keys cascade on delete
           (except users → sessions which sets null). Booleans are integers with Drizzle&apos;s
@@ -255,6 +254,7 @@ function SchemaSection() {
   └── sessions
         ├── questions
         │     ├── upvotes
+        │     ├── question_reactions
         │     └── replies
         ├── polls
         │     ├── poll_options
@@ -289,7 +289,8 @@ function SchemaSection() {
       <DocCard>
         <SubTitle>Key Design Decisions</SubTitle>
         <div className="space-y-3">
-          <Prose><strong style={{ color: 'var(--text-strong)' }}>Anonymous participation via voter tokens.</strong> Audience members don&apos;t need accounts. A random UUID generated client-side is stored in localStorage. Unique indexes on (voter_token, entity_id) prevent double-voting.</Prose>
+          <Prose><strong style={{ color: 'var(--text-strong)' }}>Anonymous participation via voter tokens.</strong> Audience members don&apos;t need accounts. A random UUID generated client-side is stored in localStorage. Each voter gets one vote per question, with toggles and direction switches enforced by a unique index.</Prose>
+          <Prose><strong style={{ color: 'var(--text-strong)' }}>Independent question reactions.</strong> Each voter can toggle several different Slido reactions on one question. A unique index on (voter_token, question_id, emoji) prevents duplicate reactions.</Prose>
           <Prose><strong style={{ color: 'var(--text-strong)' }}>Polymorphic poll responses.</strong> A single poll_responses table handles all 5 poll types through nullable columns: selected_option_id for MC, rating_value for ratings, text_value for word cloud / open text, and ranking_order (JSON) for ranking.</Prose>
           <Prose><strong style={{ color: 'var(--text-strong)' }}>Quiz scoring formula.</strong> score = max(100, 1000 − (answeredInMs / timeLimitMs) × 900) for correct answers, 0 for wrong. Faster answers earn more, floor of 100.</Prose>
         </div>
@@ -351,7 +352,7 @@ function GraphQLSection() {
       <DocCard>
         <SectionTitle>GraphQL API Layer</SectionTitle>
         <Prose>
-          A Hono route at <Mono>/api/graphql</Mono> delegates to GraphQL Yoga. Schema-first — the SDL and resolvers are co-located in <Mono>src/api/graphql.ts</Mono> (~860 lines). Each resolver makes direct Drizzle queries; there is no DataLoader or batching layer.
+          A Hono route at <Mono>/api/graphql</Mono> delegates to GraphQL Yoga. Schema-first — the SDL and resolvers are co-located in <Mono>src/api/graphql.ts</Mono> (~1060 lines). Each resolver makes direct Drizzle queries; there is no DataLoader or batching layer.
         </Prose>
       </DocCard>
 
@@ -381,11 +382,12 @@ function GraphQLSection() {
             ['register / login', 'Email/password auth, returns JWT + user'],
             ['createSession', 'New session with optional passcode and owner'],
             ['updateSessionBranding', 'Set primary color and logo URL'],
-            ['createQuestion', 'Post question (auto-approved unless moderated)'],
+            ['createQuestion', 'Post a required ≤10-word title with optional body (auto-approved unless moderated)'],
             ['approveQuestion / rejectQuestion', 'Moderation actions'],
             ['highlightQuestion / markAsAnswered', 'Host curation controls'],
             ['replyToQuestion', 'Threaded reply from host or participant'],
-            ['upvoteQuestion', 'Idempotent upvote (one per voter_token)'],
+            ['voteQuestion', 'One vote per voter_token; upvote/downvote toggles and switches direction'],
+            ['reactToQuestion', 'Toggle one of five Slido reactions per voter_token'],
             ['createPoll / activate / deactivate', 'Poll lifecycle'],
             ['submitPollResponse', 'MC, rating, word cloud, ranking, or open text'],
             ['createQuiz / addQuizQuestion', 'Quiz authoring with correct answer'],
@@ -402,7 +404,11 @@ function GraphQLSection() {
         <DataTable
           headers={['Type', 'Field', 'Implementation']}
           rows={[
-            ['Question', 'upvoteCount', 'COUNT(*) from upvotes per question'],
+            ['Question', 'title', 'Stored title, with text fallback for legacy rows'],
+            ['Question', 'upvoteCount', 'COUNT(*) from upvotes where value = 1'],
+            ['Question', 'downvoteCount', 'COUNT(*) from upvotes where value = -1'],
+            ['Question', 'score', 'Grouped vote counts: upvotes minus downvotes'],
+            ['Question', 'reactions', 'Grouped question_reactions counts by emoji'],
             ['Question', 'replies', 'Eager-loaded array or fallback query'],
             ['Poll', 'responseCount', 'COUNT(*) from poll_responses per poll'],
             ['PollOption', 'voteCount', 'COUNT(*) from poll_responses per option'],
@@ -413,7 +419,7 @@ function GraphQLSection() {
       </DocCard>
 
       <InfoBox title="N+1 query pattern">
-        upvoteCount and voteCount execute a COUNT query per item. 50 questions = ~50 extra COUNT queries. Acceptable now but would benefit from DataLoader or pre-aggregation at scale.
+        Question vote and reaction fallback fields execute COUNT or GROUP BY queries per item. 50 questions can add ~50 extra queries. Acceptable now but suitable for DataLoader or pre-aggregation at scale.
       </InfoBox>
     </div>
   );
@@ -440,7 +446,7 @@ function FlowSection() {
             ['2', 'Hono worker', 'Detects Upgrade: websocket header, routes to DO via env.SESSION_DO.get(id).'],
             ['3', 'SessionDO.fetch', 'Creates WebSocketPair, calls ctx.acceptWebSocket (Hibernation API).'],
             ['4', 'SessionDO', 'Loads full state from D1 (first access — cached thereafter). Sends initial state.'],
-            ['5', 'User action', 'Client sends { type: "upvote", questionId, voterToken } over WebSocket.'],
+            ['5', 'User action', 'Client sends { type: "vote", questionId, voterToken, value } or { type: "react", questionId, voterToken, emoji } over WebSocket.'],
             ['6', 'DO handler', 'Applies mutation to cachedState instantly. Queues D1 write.'],
             ['7', 'Broadcast', 'Sends updated state to all connected clients via ctx.getWebSockets().'],
             ['8', 'Write-behind', 'Alarm fires after 1s debounce. Pending writes flushed to D1.'],
@@ -494,7 +500,7 @@ function RealtimeSection() {
             <strong style={{ color: 'var(--text-strong)' }}>Hibernation API:</strong> Uses <Mono>ctx.acceptWebSocket</Mono>, <Mono>webSocketMessage</Mono>, <Mono>webSocketClose</Mono> so idle WebSocket connections don&apos;t incur billing. On wake, the session code restores from <Mono>ws.deserializeAttachment()</Mono>.
           </Prose>
           <Prose>
-            <strong style={{ color: 'var(--text-strong)' }}>In-memory hot path:</strong> Upvotes and poll responses apply to <Mono>cachedState</Mono> in-memory and broadcast instantly. No D1 round-trip for read-side high-frequency mutations.
+            <strong style={{ color: 'var(--text-strong)' }}>In-memory hot path:</strong> Votes, reactions, and poll responses apply to <Mono>cachedState</Mono> in-memory and broadcast instantly. No D1 round-trip for read-side high-frequency mutations.
           </Prose>
           <Prose>
             <strong style={{ color: 'var(--text-strong)' }}>Write-behind batching:</strong> Pending D1 writes queue as <Mono>{'{ sql, params }'}</Mono> tuples and flush via the Alarm API (1s debounce). If the flush fails, writes re-queue for retry.
@@ -514,8 +520,9 @@ function RealtimeSection() {
           headers={['Direction', 'Type', 'Payload']}
           rows={[
             ['Client → DO', 'subscribe', '{ type: "subscribe", code: "SLIDODEV" }'],
-            ['Client → DO', 'upvote', '{ type: "upvote", questionId, voterToken }'],
-            ['Client → DO', 'createQuestion', '{ type: "createQuestion", text, authorName? }'],
+            ['Client → DO', 'vote', '{ type: "vote", questionId, voterToken, value: 1 | -1 }'],
+            ['Client → DO', 'react', '{ type: "react", questionId, voterToken, emoji }'],
+            ['Client → DO', 'createQuestion', '{ type: "createQuestion", title, text?, authorName? }'],
             ['Client → DO', 'submitPollResponse', '{ type: "submitPollResponse", pollId, voterToken, ... }'],
             ['Client → DO', 'submitQuizAnswer', '{ type: "submitQuizAnswer", quizQuestionId, selectedOptionId, voterToken, answeredInMs }'],
             ['Client → DO', 'refresh', '{ type: "refresh" } — triggers D1 reload + broadcast'],

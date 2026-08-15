@@ -25,7 +25,7 @@ const tables = [
   'survey_answers', 'survey_responses', 'survey_options', 'survey_questions', 'surveys',
   'quiz_answers', 'quiz_options', 'quiz_questions', 'quizzes',
   'poll_responses', 'poll_options', 'polls',
-  'replies', 'upvotes', 'questions', 'sessions', 'users',
+  'replies', 'question_reactions', 'upvotes', 'questions', 'sessions', 'users',
 ];
 for (const t of tables) emit(`DELETE FROM ${t};`);
 
@@ -39,25 +39,25 @@ emit(`INSERT INTO sessions (id, code, title, is_moderated, owner_id) VALUES (1, 
 
 // ── Questions ──
 const questionsData = [
-  { text: 'Should we prioritize real-time collaboration features like Google Docs-style co-editing of polls, or keep the current single-author model?', authorName: 'Alice Park', upvotes: 12, highlighted: true, answered: false },
-  { text: 'How are we planning to handle user authentication? JWT tokens seem fine for an MVP, but should we consider OAuth2 with Google/GitHub for a smoother sign-up experience?', authorName: 'Bob Martinez', upvotes: 18, highlighted: false, answered: true },
-  { text: 'The word cloud feature looks cool but feels like a nice-to-have. Can we defer it and focus on getting the presenter mode right first?', authorName: 'Carol Davis', upvotes: 9, highlighted: false, answered: false },
-  { text: 'What about mobile responsiveness? I tried the app on my phone and the quiz timer buttons are tiny. Should we adopt a mobile-first approach?', authorName: 'Dave Wilson', upvotes: 15, highlighted: false, answered: false },
-  { text: 'Can we add a "duplicate session" feature? As a host I want to reuse my poll/quiz templates across different meetings without recreating everything.', authorName: 'Eve Thompson', upvotes: 22, highlighted: false, answered: false },
-  { text: 'The analytics dashboard is great but lacks export to PDF. CSV is fine for data nerds but most managers want a nice visual report. Worth adding?', authorName: 'Frank Lee', upvotes: 7, highlighted: false, answered: false },
-  { text: "Has anyone thought about accessibility? Screen readers can't navigate the quiz countdown timer properly. We should add ARIA labels.", authorName: 'Grace Kim', upvotes: 14, highlighted: false, answered: false },
-  { text: 'Integration with Slack would be massive. Imagine getting a notification when someone asks a question in your session. Is this feasible with webhooks?', authorName: null, upvotes: 11, highlighted: false, answered: false },
-  { text: 'For the ranking poll type, can we add drag-and-drop reordering? The current click-to-rank feels clunky compared to what Mentimeter offers.', authorName: 'Alice Park', upvotes: 6, highlighted: false, answered: false },
-  { text: 'Should we consider adding a "hand raise" feature alongside Q&A? In hybrid meetings, remote participants often get overlooked.', authorName: 'Heidi Nakamura', upvotes: 8, highlighted: false, answered: false },
-  { text: "What's our strategy for handling concurrent sessions? If 500 people join at once, will the WebSocket server hold up?", authorName: 'Bob Martinez', upvotes: 19, highlighted: false, answered: false },
-  { text: 'Can we add emoji reactions to questions instead of just upvotes? Something like thumbs-up, heart, laughing, thinking would give richer signal about audience sentiment.', authorName: 'Carol Davis', upvotes: 5, highlighted: false, answered: false },
+  { title: 'Real-Time Collaboration', text: 'Should we prioritize real-time collaboration features like Google Docs-style co-editing of polls, or keep the current single-author model?', authorName: 'Alice Park', upvotes: 12, highlighted: true, answered: false },
+  { title: 'Authentication and OAuth', text: 'How are we planning to handle user authentication? JWT tokens seem fine for an MVP, but should we consider OAuth2 with Google/GitHub for a smoother sign-up experience?', authorName: 'Bob Martinez', upvotes: 18, highlighted: false, answered: true },
+  { title: 'Prioritize Presenter Mode', text: 'The word cloud feature looks cool but feels like a nice-to-have. Can we defer it and focus on getting the presenter mode right first?', authorName: 'Carol Davis', upvotes: 9, highlighted: false, answered: false },
+  { title: 'Mobile-First Responsiveness', text: 'What about mobile responsiveness? I tried the app on my phone and the quiz timer buttons are tiny. Should we adopt a mobile-first approach?', authorName: 'Dave Wilson', upvotes: 15, highlighted: false, answered: false },
+  { title: 'Duplicate Sessions', text: 'Can we add a "duplicate session" feature? As a host I want to reuse my poll/quiz templates across different meetings without recreating everything.', authorName: 'Eve Thompson', upvotes: 22, highlighted: false, answered: false },
+  { title: 'Export Analytics Reports', text: 'The analytics dashboard is great but lacks export to PDF. CSV is fine for data nerds but most managers want a nice visual report. Worth adding?', authorName: 'Frank Lee', upvotes: 7, highlighted: false, answered: false },
+  { title: 'Improve Quiz Accessibility', text: "Has anyone thought about accessibility? Screen readers can't navigate the quiz countdown timer properly. We should add ARIA labels.", authorName: 'Grace Kim', upvotes: 14, highlighted: false, answered: false },
+  { title: 'Slack Notifications', text: 'Integration with Slack would be massive. Imagine getting a notification when someone asks a question in your session. Is this feasible with webhooks?', authorName: null, upvotes: 11, highlighted: false, answered: false },
+  { title: 'Drag-and-Drop Ranking', text: 'For the ranking poll type, can we add drag-and-drop reordering? The current click-to-rank feels clunky compared to what Mentimeter offers.', authorName: 'Alice Park', upvotes: 6, highlighted: false, answered: false },
+  { title: 'Add Hand Raise', text: 'Should we consider adding a "hand raise" feature alongside Q&A? In hybrid meetings, remote participants often get overlooked.', authorName: 'Heidi Nakamura', upvotes: 8, highlighted: false, answered: false },
+  { title: 'Scaling Concurrent Sessions', text: "What's our strategy for handling concurrent sessions? If 500 people join at once, will the WebSocket server hold up?", authorName: 'Bob Martinez', upvotes: 19, highlighted: false, answered: false },
+  { title: 'Emoji Reactions for Questions', text: 'Can we add emoji reactions to questions instead of just upvotes? Something like thumbs-up, heart, laughing, thinking would give richer signal about audience sentiment.', authorName: 'Carol Davis', upvotes: 5, highlighted: false, answered: false },
 ];
 
 for (let i = 0; i < questionsData.length; i++) {
   const q = questionsData[i];
   const qId = i + 1;
   const authorVal = q.authorName ? `'${esc(q.authorName)}'` : 'NULL';
-  emit(`INSERT INTO questions (id, text, author_name, is_approved, is_highlighted, is_answered, session_id) VALUES (${qId}, '${esc(q.text)}', ${authorVal}, 1, ${q.highlighted ? 1 : 0}, ${q.answered ? 1 : 0}, 1);`);
+  emit(`INSERT INTO questions (id, title, text, author_name, is_approved, is_highlighted, is_answered, session_id) VALUES (${qId}, '${esc(q.title)}', '${esc(q.text)}', ${authorVal}, 1, ${q.highlighted ? 1 : 0}, ${q.answered ? 1 : 0}, 1);`);
 
   const voterCount = Math.min(q.upvotes, VOTER_TOKENS.length);
   for (let vi = 0; vi < voterCount; vi++) {

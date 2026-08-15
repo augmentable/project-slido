@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE TABLE IF NOT EXISTS questions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
   text TEXT NOT NULL,
   author_name TEXT,
   is_approved INTEGER DEFAULT 1 NOT NULL,
@@ -37,9 +38,19 @@ CREATE TABLE IF NOT EXISTS upvotes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   voter_token TEXT NOT NULL,
   question_id INTEGER NOT NULL,
+  value INTEGER NOT NULL DEFAULT 1,
   FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS upvotes_voter_question_idx ON upvotes (voter_token, question_id);
+CREATE TABLE IF NOT EXISTS question_reactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  voter_token TEXT NOT NULL,
+  question_id INTEGER NOT NULL,
+  emoji TEXT NOT NULL,
+  FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS question_reactions_voter_question_emoji_idx
+  ON question_reactions (voter_token, question_id, emoji);
 CREATE TABLE IF NOT EXISTS replies (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   text TEXT NOT NULL,
@@ -163,7 +174,7 @@ const TABLES = [
   'survey_answers', 'survey_responses', 'survey_options', 'survey_questions', 'surveys',
   'quiz_answers', 'quiz_options', 'quiz_questions', 'quizzes',
   'poll_responses', 'poll_options', 'polls',
-  'upvotes', 'replies', 'questions',
+  'question_reactions', 'upvotes', 'replies', 'questions',
   'sessions', 'users',
 ];
 
@@ -189,10 +200,10 @@ async function seedSession(db: D1Database, opts: { code: string; title: string; 
   return result!.id;
 }
 
-async function seedQuestion(db: D1Database, sessionId: number, text: string) {
+async function seedQuestion(db: D1Database, sessionId: number, text: string, title = text) {
   const result = await db.prepare(
-    'INSERT INTO questions (text, session_id) VALUES (?, ?) RETURNING id'
-  ).bind(text, sessionId).first<{ id: number }>();
+    'INSERT INTO questions (title, text, session_id) VALUES (?, ?, ?) RETURNING id'
+  ).bind(title, text, sessionId).first<{ id: number }>();
   return result!.id;
 }
 
@@ -316,13 +327,13 @@ describe('SessionDO', () => {
       ws.close(1000);
     });
 
-    it('loads existing questions and upvotes on connect', async () => {
+    it('loads existing questions and votes on connect', async () => {
       const sessionId = await seedSession(env.DB, { code: 'HASDATA', title: 'Session With Data' });
       const qId = await seedQuestion(env.DB, sessionId, 'What is Cloudflare?');
-      await env.DB.prepare('INSERT INTO upvotes (voter_token, question_id) VALUES (?, ?)')
-        .bind('voter-1', qId).run();
-      await env.DB.prepare('INSERT INTO upvotes (voter_token, question_id) VALUES (?, ?)')
-        .bind('voter-2', qId).run();
+      await env.DB.prepare('INSERT INTO upvotes (voter_token, question_id, value) VALUES (?, ?, ?)')
+        .bind('voter-1', qId, 1).run();
+      await env.DB.prepare('INSERT INTO upvotes (voter_token, question_id, value) VALUES (?, ?, ?)')
+        .bind('voter-2', qId, 1).run();
 
       const { ws, firstMessage } = await wsConnect('HASDATA');
       expect(firstMessage.type).toBe('state');
@@ -349,6 +360,7 @@ describe('SessionDO', () => {
 
       ws1.send(JSON.stringify({
         type: 'createQuestion',
+        title: 'How do Durable Objects work?',
         text: 'How do Durable Objects work?',
         authorName: 'Alice',
       }));
@@ -359,6 +371,7 @@ describe('SessionDO', () => {
 
       if (msg1.type === 'state') {
         expect(msg1.data.questions).toHaveLength(1);
+        expect(msg1.data.questions[0].title).toBe('How do Durable Objects work?');
         expect(msg1.data.questions[0].text).toBe('How do Durable Objects work?');
         expect(msg1.data.questions[0].authorName).toBe('Alice');
         expect(msg1.data.questions[0].isApproved).toBe(true);
@@ -373,17 +386,35 @@ describe('SessionDO', () => {
       ws2.close(1000);
     });
 
-    it('rejects empty question text', async () => {
+    it('rejects a missing title', async () => {
       await seedSession(env.DB, { code: 'EMPTY', title: 'Empty Test' });
       const { ws, firstMessage } = await wsConnect('EMPTY');
       expect(firstMessage.type).toBe('state');
 
       const errorMsg = nextMessage(ws);
-      ws.send(JSON.stringify({ type: 'createQuestion', text: '   ' }));
+      ws.send(JSON.stringify({ type: 'createQuestion', text: 'Optional body' }));
       const msg = await errorMsg;
       expect(msg.type).toBe('error');
       if (msg.type === 'error') {
-        expect(msg.message).toBe('Question text required');
+        expect(msg.message).toBe('Title is required');
+      }
+      ws.close(1000);
+    });
+
+    it('rejects an 11-word title', async () => {
+      await seedSession(env.DB, { code: 'TOOLONG', title: 'Title Limit Test' });
+      const { ws, firstMessage } = await wsConnect('TOOLONG');
+      expect(firstMessage.type).toBe('state');
+
+      const errorMsg = nextMessage(ws);
+      ws.send(JSON.stringify({
+        type: 'createQuestion',
+        title: 'one two three four five six seven eight nine ten eleven',
+      }));
+      const msg = await errorMsg;
+      expect(msg.type).toBe('error');
+      if (msg.type === 'error') {
+        expect(msg.message).toBe('Title must be 10 words or fewer');
       }
       ws.close(1000);
     });
@@ -394,7 +425,7 @@ describe('SessionDO', () => {
       expect(firstMessage.type).toBe('state');
 
       const broadcast = nextMessage(ws);
-      ws.send(JSON.stringify({ type: 'createQuestion', text: 'Pending question' }));
+      ws.send(JSON.stringify({ type: 'createQuestion', title: 'Pending question', text: 'Optional body' }));
       const msg = await broadcast;
 
       // In moderated mode, the question is inserted but NOT shown in the broadcast
@@ -411,35 +442,116 @@ describe('SessionDO', () => {
     });
   });
 
-  describe('upvote', () => {
-    it('increments upvote count in broadcast', async () => {
-      const sessionId = await seedSession(env.DB, { code: 'UPVOTE', title: 'Upvote Test' });
-      const qId = await seedQuestion(env.DB, sessionId, 'Upvote me');
+  describe('vote', () => {
+    it('increments the selected vote count and score', async () => {
+      const sessionId = await seedSession(env.DB, { code: 'VOTE', title: 'Vote Test' });
+      const qId = await seedQuestion(env.DB, sessionId, 'Vote me');
 
-      const { ws, firstMessage } = await wsConnect('UPVOTE');
+      const { ws, firstMessage } = await wsConnect('VOTE');
       expect(firstMessage.type).toBe('state');
       if (firstMessage.type === 'state') {
         expect(firstMessage.data.questions[0].upvoteCount).toBe(0);
+        expect(firstMessage.data.questions[0].downvoteCount).toBe(0);
+        expect(firstMessage.data.questions[0].score).toBe(0);
       }
 
       const broadcast = nextMessage(ws);
-      ws.send(JSON.stringify({ type: 'upvote', questionId: qId, voterToken: 'voter-abc' }));
+      ws.send(JSON.stringify({ type: 'vote', questionId: qId, voterToken: 'voter-abc', value: 1 }));
       const msg = await broadcast;
       expect(msg.type).toBe('state');
       if (msg.type === 'state') {
-        expect(msg.data.questions[0].upvoteCount).toBe(1);
+        const question = msg.data.questions[0];
+        expect(question.upvoteCount).toBe(1);
+        expect(question.downvoteCount).toBe(0);
+        expect(question.score).toBe(1);
       }
 
       ws.close(1000);
     });
 
-    it('rejects upvote for nonexistent question', async () => {
-      await seedSession(env.DB, { code: 'UPBAD', title: 'Upvote Bad' });
-      const { ws, firstMessage } = await wsConnect('UPBAD');
+    it('does not inflate counts for duplicate votes from one voter', async () => {
+      const sessionId = await seedSession(env.DB, { code: 'VOTEDUP', title: 'Duplicate Vote Test' });
+      const qId = await seedQuestion(env.DB, sessionId, 'Vote me');
+      const { ws, firstMessage } = await wsConnect('VOTEDUP');
+      expect(firstMessage.type).toBe('state');
+
+      const firstBroadcast = nextMessage(ws);
+      ws.send(JSON.stringify({ type: 'vote', questionId: qId, voterToken: 'same-voter', value: 1 }));
+      const first = await firstBroadcast;
+      expect(first.type).toBe('state');
+      if (first.type === 'state') expect(first.data.questions[0].upvoteCount).toBe(1);
+
+      const secondBroadcast = nextMessage(ws);
+      ws.send(JSON.stringify({ type: 'vote', questionId: qId, voterToken: 'same-voter', value: 1 }));
+      const second = await secondBroadcast;
+      expect(second.type).toBe('state');
+      if (second.type === 'state') {
+        expect(second.data.questions[0].upvoteCount).toBe(0);
+        expect(second.data.questions[0].score).toBe(0);
+      }
+
+      ws.close(1000);
+    });
+
+    it('switches from downvote to upvote for one voter', async () => {
+      const sessionId = await seedSession(env.DB, { code: 'VOTESWITCH', title: 'Vote Switch Test' });
+      const qId = await seedQuestion(env.DB, sessionId, 'Vote me');
+      const { ws, firstMessage } = await wsConnect('VOTESWITCH');
+      expect(firstMessage.type).toBe('state');
+
+      const downvoteBroadcast = nextMessage(ws);
+      ws.send(JSON.stringify({ type: 'vote', questionId: qId, voterToken: 'switcher', value: -1 }));
+      const downvote = await downvoteBroadcast;
+      expect(downvote.type).toBe('state');
+      if (downvote.type === 'state') {
+        expect(downvote.data.questions[0].upvoteCount).toBe(0);
+        expect(downvote.data.questions[0].downvoteCount).toBe(1);
+        expect(downvote.data.questions[0].score).toBe(-1);
+      }
+
+      const upvoteBroadcast = nextMessage(ws);
+      ws.send(JSON.stringify({ type: 'vote', questionId: qId, voterToken: 'switcher', value: 1 }));
+      const upvote = await upvoteBroadcast;
+      expect(upvote.type).toBe('state');
+      if (upvote.type === 'state') {
+        expect(upvote.data.questions[0].upvoteCount).toBe(1);
+        expect(upvote.data.questions[0].downvoteCount).toBe(0);
+        expect(upvote.data.questions[0].score).toBe(1);
+      }
+
+      ws.close(1000);
+    });
+
+    it('toggles off a second identical vote', async () => {
+      const sessionId = await seedSession(env.DB, { code: 'VOTEOFF', title: 'Vote Toggle Test' });
+      const qId = await seedQuestion(env.DB, sessionId, 'Vote me');
+      const { ws, firstMessage } = await wsConnect('VOTEOFF');
+      expect(firstMessage.type).toBe('state');
+
+      const firstBroadcast = nextMessage(ws);
+      ws.send(JSON.stringify({ type: 'vote', questionId: qId, voterToken: 'toggle-voter', value: -1 }));
+      await firstBroadcast;
+
+      const secondBroadcast = nextMessage(ws);
+      ws.send(JSON.stringify({ type: 'vote', questionId: qId, voterToken: 'toggle-voter', value: -1 }));
+      const msg = await secondBroadcast;
+      expect(msg.type).toBe('state');
+      if (msg.type === 'state') {
+        expect(msg.data.questions[0].upvoteCount).toBe(0);
+        expect(msg.data.questions[0].downvoteCount).toBe(0);
+        expect(msg.data.questions[0].score).toBe(0);
+      }
+
+      ws.close(1000);
+    });
+
+    it('rejects a vote for a nonexistent question', async () => {
+      await seedSession(env.DB, { code: 'VOTEBAD', title: 'Vote Bad' });
+      const { ws, firstMessage } = await wsConnect('VOTEBAD');
       expect(firstMessage.type).toBe('state');
 
       const errorMsg = nextMessage(ws);
-      ws.send(JSON.stringify({ type: 'upvote', questionId: 9999, voterToken: 'voter-x' }));
+      ws.send(JSON.stringify({ type: 'vote', questionId: 9999, voterToken: 'voter-x', value: 1 }));
       const msg = await errorMsg;
       expect(msg.type).toBe('error');
       if (msg.type === 'error') {
@@ -448,20 +560,45 @@ describe('SessionDO', () => {
       ws.close(1000);
     });
 
-    it('rejects upvote without voter token', async () => {
-      const sessionId = await seedSession(env.DB, { code: 'UPNOTOKEN', title: 'No Token' });
-      await seedQuestion(env.DB, sessionId, 'Q');
+    it('rejects a vote without a voter token', async () => {
+      const sessionId = await seedSession(env.DB, { code: 'VOTENOTOKEN', title: 'No Token' });
+      const qId = await seedQuestion(env.DB, sessionId, 'Q');
 
-      const { ws, firstMessage } = await wsConnect('UPNOTOKEN');
+      const { ws, firstMessage } = await wsConnect('VOTENOTOKEN');
       expect(firstMessage.type).toBe('state');
 
       const errorMsg = nextMessage(ws);
-      ws.send(JSON.stringify({ type: 'upvote', questionId: 1, voterToken: '   ' }));
+      ws.send(JSON.stringify({ type: 'vote', questionId: qId, voterToken: '   ', value: 1 }));
       const msg = await errorMsg;
       expect(msg.type).toBe('error');
       if (msg.type === 'error') {
         expect(msg.message).toBe('Voter token required');
       }
+      ws.close(1000);
+    });
+  });
+
+  describe('question reactions', () => {
+    it('increments then toggles off a reaction for one voter', async () => {
+      const sessionId = await seedSession(env.DB, { code: 'REACT', title: 'Reaction Test' });
+      const qId = await seedQuestion(env.DB, sessionId, 'React to me');
+      const { ws, firstMessage } = await wsConnect('REACT');
+      expect(firstMessage.type).toBe('state');
+
+      const firstBroadcast = nextMessage(ws);
+      ws.send(JSON.stringify({ type: 'react', questionId: qId, voterToken: 'reactor', emoji: 'heart' }));
+      const first = await firstBroadcast;
+      expect(first.type).toBe('state');
+      if (first.type === 'state') {
+        expect(first.data.questions[0].reactions).toEqual([{ emoji: 'heart', count: 1 }]);
+      }
+
+      const secondBroadcast = nextMessage(ws);
+      ws.send(JSON.stringify({ type: 'react', questionId: qId, voterToken: 'reactor', emoji: 'heart' }));
+      const second = await secondBroadcast;
+      expect(second.type).toBe('state');
+      if (second.type === 'state') expect(second.data.questions[0].reactions).toEqual([]);
+
       ws.close(1000);
     });
   });

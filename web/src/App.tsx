@@ -6,6 +6,7 @@ import DocsPage from './routes/Docs';
 import SessionPage from './routes/Session';
 import AnalyticsPage from './routes/Analytics';
 import PresenterPage from './routes/Presenter';
+import SettingsPage from './routes/Settings';
 
 export function App() {
   return (
@@ -18,6 +19,7 @@ export function App() {
             <Route path="/session/:code" element={<SessionPage />} />
             <Route path="/session/:code/analytics" element={<AnalyticsPage />} />
             <Route path="/session/:code/present" element={<PresenterPage />} />
+            <Route path="/session/:code/settings" element={<SettingsPage />} />
           </Routes>
         </BrowserRouter>
       </ApolloWrapper>

@@ -105,7 +105,24 @@ npm run db:migrate
 npm run db:seed
 ```
 
-### 3. Start Development Server
+### 3. Configure Question Titles and Admin Access
+
+Copy `web/.env.example` to `web/.env.local` and set both variables:
+
+```dotenv
+OPENROUTER=
+ADMIN_PASSWORD=
+```
+
+`OPENROUTER` is the fallback API key for title generation. An admin can override it at
+runtime from **Session → Settings → Admin**; that key is stored in the `app_settings`
+table and takes precedence over the environment variable.
+
+`ADMIN_PASSWORD` seeds the admin password on the first unlock. After that the hash lives
+in `app_settings.admin_password_hash` and the environment variable is no longer consulted,
+so rotating it means updating that row.
+
+### 4. Start Development Server
 
 Run both the API worker and the frontend dev server:
 
@@ -151,6 +168,17 @@ npm run deploy
 npm run deploy:preview
 ```
 
+Automatic topic titles call OpenRouter. The key is read from `app_settings`
+(set it in the session settings page) and falls back to a Wrangler secret:
+
+```bash
+npx wrangler secret put OPENROUTER
+```
+
+`ADMIN_PASSWORD` is the bootstrap password for that settings page — set it the
+same way. It is only consulted the first time an admin signs in; after that the
+hash lives in `app_settings`.
+
 The build pipeline: `vite build` (frontend SPA into `dist/client/`) → `wrangler deploy` (bundles `src/worker.ts` as the Worker entry).
 
 ---
@@ -158,6 +186,7 @@ The build pipeline: `vite build` (frontend SPA into `dist/client/`) → `wrangle
 ## Features
 
 - **Q&A** with upvoting, moderation, highlighting, replies, and sorting (popular/recent/unanswered)
+- **Q&A** with short titles, up/down votes (one per person), emoji reactions, moderation, highlighting, replies, and sorting (popular/recent/unanswered)
 - **Live Polls** — Multiple choice, rating, word cloud, open text, ranking
 - **Quizzes** — Timed questions with speed-based scoring and leaderboards
 - **Surveys** — Multi-question forms with multiple choice, rating, and open text

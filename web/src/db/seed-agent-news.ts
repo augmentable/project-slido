@@ -34,29 +34,29 @@ emit(`INSERT INTO sessions (id, code, title, is_moderated, owner_id) VALUES (${S
 
 // ── Questions from HN (AI agent stories, sorted by points) ──
 const stories = [
-  { title: 'An AI agent published a hit piece on me', author: 'scottshambaugh', points: 2346, comments: 951, url: 'https://theshamblog.com/an-ai-agent-published-a-hit-piece-on-me/', date: '2026-02' },
-  { title: 'AI agent bankrupted their operator while trying to scan DN42', author: 'xiaoyu2006', points: 1467, comments: 536, url: 'https://lantian.pub/en/article/fun/ai-agent-bankrupted-their-operator-scan-dn42lantian.lantian/', date: '2026-06' },
-  { title: 'OpenCode — Open source AI coding agent', author: 'rbanffy', points: 1274, comments: 618, url: 'https://opencode.ai/', date: '2026-03' },
-  { title: 'Andrej Karpathy: It will take a decade to work through the issues with agents', author: 'ctoth', points: 1212, comments: 1115, url: 'https://www.dwarkesh.com/p/andrej-karpathy', date: '2025-10' },
-  { title: 'You should write an agent (Fly.io)', author: 'tabletcorry', points: 1070, comments: 395, url: 'https://fly.io/blog/everyone-write-an-agent/', date: '2025-11' },
-  { title: 'AlphaEvolve: A Gemini-powered coding agent for designing advanced algorithms', author: 'Fysi', points: 1036, comments: 270, url: 'https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/', date: '2025-05' },
-  { title: 'AI agent opens a PR, writes a blogpost to shame the maintainer who closes it', author: 'wrxd', points: 953, comments: 750, url: 'https://github.com/matplotlib/matplotlib/pull/31132', date: '2026-02' },
-  { title: 'Opus 4.5 is not the normal AI agent experience that I have had thus far', author: 'tbassetto', points: 879, comments: 1353, url: 'https://burkeholland.github.io/posts/opus-4-5-change-everything/', date: '2026-01' },
-  { title: 'An AI agent deleted our production database. The agent\'s confession is below', author: 'jeremyccrane', points: 860, comments: 1032, url: 'https://twitter.com/lifeof_jer/status/2048103471019434248', date: '2026-04' },
-  { title: 'AGENTS.md — Open format for guiding coding agents', author: 'ghuntley', points: 837, comments: 382, url: 'https://agents.md/', date: '2025-08' },
-  { title: 'Agent Safehouse — macOS-native sandboxing for local agents', author: 'atombender', points: 823, comments: 178, url: 'https://agent-safehouse.dev/', date: '2026-03' },
-  { title: 'OpenAI adds MCP support to Agents SDK', author: 'gronky_', points: 807, comments: 267, url: 'https://openai.github.io/openai-agents-python/mcp/', date: '2025-03' },
-  { title: 'Leanstral: Open-source agent for trustworthy coding and formal proof engineering', author: 'Poudlardo', points: 783, comments: 191, url: 'https://mistral.ai/news/leanstral', date: '2026-03' },
-  { title: 'Muse Glimmer: 30B-parameter model optimized for always-on local agent workflows', author: 'riordan', points: 778, comments: 433, url: 'https://research.meta.ai/blog/introducing-muse-glimmer-open-agentic-model', date: '2026-08' },
-  { title: 'CLI agents make self-hosting on a home server easier and fun', author: 'websku', points: 775, comments: 549, url: 'https://fulghum.io/self-hosting', date: '2026-01' },
+  { title: 'AI Agent Published a Hit Piece', textTitle: 'An AI agent published a hit piece on me', author: 'scottshambaugh', points: 2346, comments: 951, url: 'https://theshamblog.com/an-ai-agent-published-a-hit-piece-on-me/', date: '2026-02' },
+  { title: 'AI Agent Bankrupted Its Operator', textTitle: 'AI agent bankrupted their operator while trying to scan DN42', author: 'xiaoyu2006', points: 1467, comments: 536, url: 'https://lantian.pub/en/article/fun/ai-agent-bankrupted-their-operator-scan-dn42lantian.lantian/', date: '2026-06' },
+  { title: 'OpenCode Open Source Coding Agent', textTitle: 'OpenCode — Open source AI coding agent', author: 'rbanffy', points: 1274, comments: 618, url: 'https://opencode.ai/', date: '2026-03' },
+  { title: 'Karpathy on Agent Challenges', textTitle: 'Andrej Karpathy: It will take a decade to work through the issues with agents', author: 'ctoth', points: 1212, comments: 1115, url: 'https://www.dwarkesh.com/p/andrej-karpathy', date: '2025-10' },
+  { title: 'Write an Agent', textTitle: 'You should write an agent (Fly.io)', author: 'tabletcorry', points: 1070, comments: 395, url: 'https://fly.io/blog/everyone-write-an-agent/', date: '2025-11' },
+  { title: 'AlphaEvolve Coding Agent', textTitle: 'AlphaEvolve: A Gemini-powered coding agent for designing advanced algorithms', author: 'Fysi', points: 1036, comments: 270, url: 'https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/', date: '2025-05' },
+  { title: 'Agent Shamed a Maintainer', textTitle: 'AI agent opens a PR, writes a blogpost to shame the maintainer who closes it', author: 'wrxd', points: 953, comments: 750, url: 'https://github.com/matplotlib/matplotlib/pull/31132', date: '2026-02' },
+  { title: 'Opus 4.5 Agent Experience', textTitle: 'Opus 4.5 is not the normal AI agent experience that I have had thus far', author: 'tbassetto', points: 879, comments: 1353, url: 'https://burkeholland.github.io/posts/opus-4-5-change-everything/', date: '2026-01' },
+  { title: 'Agent Deleted Production Database', textTitle: 'An AI agent deleted our production database. The agent\'s confession is below', author: 'jeremyccrane', points: 860, comments: 1032, url: 'https://twitter.com/lifeof_jer/status/2048103471019434248', date: '2026-04' },
+  { title: 'AGENTS.md Open Format', textTitle: 'AGENTS.md — Open format for guiding coding agents', author: 'ghuntley', points: 837, comments: 382, url: 'https://agents.md/', date: '2025-08' },
+  { title: 'Agent Safehouse Sandboxing', textTitle: 'Agent Safehouse — macOS-native sandboxing for local agents', author: 'atombender', points: 823, comments: 178, url: 'https://agent-safehouse.dev/', date: '2026-03' },
+  { title: 'OpenAI Adds MCP Support', textTitle: 'OpenAI adds MCP support to Agents SDK', author: 'gronky_', points: 807, comments: 267, url: 'https://openai.github.io/openai-agents-python/mcp/', date: '2025-03' },
+  { title: 'Leanstral Coding and Proof Agent', textTitle: 'Leanstral: Open-source agent for trustworthy coding and formal proof engineering', author: 'Poudlardo', points: 783, comments: 191, url: 'https://mistral.ai/news/leanstral', date: '2026-03' },
+  { title: 'Muse Glimmer Local Agent Model', textTitle: 'Muse Glimmer: 30B-parameter model optimized for always-on local agent workflows', author: 'riordan', points: 778, comments: 433, url: 'https://research.meta.ai/blog/introducing-muse-glimmer-open-agentic-model', date: '2026-08' },
+  { title: 'CLI Agents for Home Servers', textTitle: 'CLI agents make self-hosting on a home server easier and fun', author: 'websku', points: 775, comments: 549, url: 'https://fulghum.io/self-hosting', date: '2026-01' },
 ];
 
 let upvoteId = UPVOTE_START;
 for (let i = 0; i < stories.length; i++) {
   const s = stories[i];
   const qId = Q_START + i;
-  const questionText = `${s.title}\n\n${s.url}\n\n${s.points} points · ${s.comments} comments on HN · ${s.date}`;
-  emit(`INSERT INTO questions (id, text, author_name, is_approved, is_highlighted, is_answered, session_id) VALUES (${qId}, '${esc(questionText)}', '${esc(s.author)}', 1, ${i < 3 ? 1 : 0}, 0, ${SESSION_ID});`);
+  const questionText = `${s.textTitle}\n\n${s.url}\n\n${s.points} points · ${s.comments} comments on HN · ${s.date}`;
+  emit(`INSERT INTO questions (id, title, text, author_name, is_approved, is_highlighted, is_answered, session_id) VALUES (${qId}, '${esc(s.title)}', '${esc(questionText)}', '${esc(s.author)}', 1, ${i < 3 ? 1 : 0}, 0, ${SESSION_ID});`);
 
   const scaledUpvotes = Math.min(Math.round(s.points / 300), VOTER_TOKENS.length);
   for (let vi = 0; vi < scaledUpvotes; vi++) {

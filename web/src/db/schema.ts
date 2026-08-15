@@ -27,6 +27,13 @@ export const sessions = sqliteTable('sessions', {
   logoUrl: text('logo_url'),
   ownerId: integer('owner_id').references(() => users.id, { onDelete: 'set null' }),
   createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+  pollsEnabled: integer('polls_enabled', { mode: 'boolean' }).default(false).notNull(),
+  quizzesEnabled: integer('quizzes_enabled', { mode: 'boolean' }).default(false).notNull(),
+  repliesEnabled: integer('replies_enabled', { mode: 'boolean' }).default(false).notNull(),
+  surveysEnabled: integer('surveys_enabled', { mode: 'boolean' }).default(false).notNull(),
+  votesEnabled: integer('votes_enabled', { mode: 'boolean' }).default(true).notNull(),
+  saturdayBannerEnabled: integer('saturday_banner_enabled', { mode: 'boolean' }).default(true).notNull(),
+  reactionsEnabled: integer('reactions_enabled', { mode: 'boolean' }).default(false).notNull(),
 });
 
 export const sessionsRelations = relations(sessions, ({ one, many }) => ({
@@ -41,6 +48,7 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
 
 export const questions = sqliteTable('questions', {
   id: integer('id').primaryKey({ autoIncrement: true }),
+  title: text('title').notNull(),
   text: text('text').notNull(),
   authorName: text('author_name'),
   isApproved: integer('is_approved', { mode: 'boolean' }).default(true).notNull(),
@@ -53,6 +61,7 @@ export const questions = sqliteTable('questions', {
 export const questionsRelations = relations(questions, ({ one, many }) => ({
   session: one(sessions, { fields: [questions.sessionId], references: [sessions.id] }),
   upvotes: many(upvotes),
+  reactions: many(questionReactions),
   replies: many(replies),
 }));
 
@@ -62,12 +71,28 @@ export const upvotes = sqliteTable('upvotes', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   voterToken: text('voter_token').notNull(),
   questionId: integer('question_id').notNull().references(() => questions.id, { onDelete: 'cascade' }),
+  value: integer('value').default(1).notNull(),
 }, (t) => [
   uniqueIndex('upvotes_voter_question_idx').on(t.voterToken, t.questionId),
 ]);
 
 export const upvotesRelations = relations(upvotes, ({ one }) => ({
   question: one(questions, { fields: [upvotes.questionId], references: [questions.id] }),
+}));
+
+// ── Question Reactions ──
+
+export const questionReactions = sqliteTable('question_reactions', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  voterToken: text('voter_token').notNull(),
+  questionId: integer('question_id').notNull().references(() => questions.id, { onDelete: 'cascade' }),
+  emoji: text('emoji').notNull(),
+}, (t) => [
+  uniqueIndex('question_reactions_voter_question_emoji_idx').on(t.voterToken, t.questionId, t.emoji),
+]);
+
+export const questionReactionsRelations = relations(questionReactions, ({ one }) => ({
+  question: one(questions, { fields: [questionReactions.questionId], references: [questions.id] }),
 }));
 
 // ── Replies ──
@@ -276,3 +301,11 @@ export const surveyAnswersRelations = relations(surveyAnswers, ({ one }) => ({
   surveyQuestion: one(surveyQuestions, { fields: [surveyAnswers.surveyQuestionId], references: [surveyQuestions.id] }),
   selectedOption: one(surveyOptions, { fields: [surveyAnswers.selectedOptionId], references: [surveyOptions.id] }),
 }));
+
+// ── App Settings ──
+
+export const appSettings = sqliteTable('app_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
