@@ -1,0 +1,31 @@
+name = "slido-clone-votes"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+main = "src/worker.ts"
+
+[assets]
+directory = "dist/client"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# Isolated D1 — does not share data with production
+[[d1_databases]]
+binding = "DB"
+database_name = "slido-db-votes"
+database_id = "da4814cb-658e-45cb-87ef-5cc84603660f"
+migrations_dir = "drizzle"
+
+[[durable_objects.bindings]]
+name = "SESSION_DO"
+class_name = "SessionDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SessionDO"]
+
+[observability]
+enabled = true
+head_sampling_rate = 0.01
+
+[limits]
+cpu_ms = 300_000

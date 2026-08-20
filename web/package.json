@@ -10,6 +10,7 @@
     "preview": "wrangler dev",
     "deploy": "vite build && wrangler deploy",
     "deploy:preview": "vite build && wrangler deploy --config wrangler.preview.toml",
+    "deploy:votes": "vite build && wrangler deploy --config wrangler.votes.toml",
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "wrangler d1 migrations apply slido-db --local",

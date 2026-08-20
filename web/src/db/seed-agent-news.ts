@@ -135,9 +135,12 @@ writeFileSync(sqlFile, lines.join('\n'), 'utf-8');
 console.log(`Generated ${lines.length} SQL statements → ${sqlFile}`);
 
 try {
-  const target = process.argv.includes('--remote') ? '--remote' : '--local';
-  console.log(`Executing against ${target.replace('--', '')} D1...`);
-  execSync(`npx wrangler d1 execute slido-db ${target} --file=${sqlFile}`, { stdio: 'inherit' });
+  const config = process.argv.find(a => a.startsWith('--config='))?.split('=')[1] || '';
+  const configFlag = config ? `--config ${config}` : '';
+  const dbName = config.includes('votes') ? 'slido-db-votes' : 'slido-db';
+  const target = process.argv.includes('--remote') || config ? '--remote' : '--local';
+  console.log(`Executing against ${dbName} (${target.replace('--', '')})...`);
+  execSync(`npx wrangler d1 execute ${dbName} ${target} ${configFlag} --file=${sqlFile}`, { stdio: 'inherit' });
   console.log('\nSeed complete!');
   console.log('  Session: AGENTNEWS');
   console.log(`  Questions: ${stories.length} (from HN top "agents" stories)`);

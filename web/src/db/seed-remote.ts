@@ -183,7 +183,10 @@ console.log(`Generated ${lines.length} SQL statements → ${sqlFile}`);
 
 try {
   console.log('Executing against remote D1...');
-  execSync(`npx wrangler d1 execute slido-db --remote --file=${sqlFile}`, { stdio: 'inherit' });
+  const config = process.argv.find(a => a.startsWith('--config='))?.split('=')[1] || '';
+  const configFlag = config ? `--config ${config}` : '';
+  const dbName = config.includes('votes') ? 'slido-db-votes' : 'slido-db';
+  execSync(`npx wrangler d1 execute ${dbName} --remote ${configFlag} --file=${sqlFile}`, { stdio: 'inherit' });
   console.log('\nSeed complete!');
   console.log('  Session: SLIDODEV');
   console.log('  Host login: host@slido.dev / password123');
